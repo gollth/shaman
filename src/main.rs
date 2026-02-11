@@ -22,12 +22,37 @@ struct Args {
     height: usize,
 }
 
+#[derive(Debug)]
+struct Layout {
+    width: usize,
+    height: usize,
+    robots: Vec<Robot>,
+    graph: Graph<Vertex, ()>,
+}
+
+/// Position of each cell in the layout/graph
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+struct Vertex {
+    x: i32,
+    y: i32,
+}
+
+/// Position of a robot at a specific point in time
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+struct Location {
+    position: Vertex,
+    time: usize,
+}
+
 #[derive(Debug, Clone)]
 struct Robot {
     color: String,
     position: Vertex,
-    route: Vec<Vertex>,
+    route: Route,
 }
+
+#[derive(Debug, Clone, Default)]
+struct Route(Vec<Location>);
 
 impl Robot {
     fn new<C: Color>(x: i32, y: i32, color: C) -> Self {
@@ -49,19 +74,6 @@ impl Display for Robot {
     }
 }
 
-#[derive(Debug)]
-struct Layout {
-    width: usize,
-    height: usize,
-    robots: Vec<Robot>,
-    graph: Graph<Vertex, ()>,
-}
-
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-struct Vertex {
-    x: i32,
-    y: i32,
-}
 impl Vertex {
     fn new(x: i32, y: i32) -> Self {
         Self { x, y }
@@ -69,6 +81,22 @@ impl Vertex {
 
     fn distance_squared(&self, other: Self) -> f32 {
         ((self.x - other.x) as f32).powi(2) + ((self.y - other.y) as f32).powi(2)
+    }
+}
+
+impl Route {
+    fn continuously(vertices: impl Iterator<Item = Vertex>) -> Self {
+        Self(
+            vertices
+                .enumerate()
+                .map(|(time, position)| Location { position, time })
+                .collect(),
+        )
+    }
+    fn intersection(&self, other: &Self) -> Vec<Location> {
+        let a = self.0.iter().copied().collect::<HashSet<_>>();
+        let b = other.0.iter().copied().collect::<HashSet<_>>();
+        a.intersection(&b).copied().collect()
     }
 }
 
@@ -102,7 +130,7 @@ impl Layout {
         self.graph.node_indices().find(|n| self.graph[*n] == v)
     }
 
-    fn route(&self, start: (i32, i32), goal: (i32, i32)) -> anyhow::Result<Vec<Vertex>> {
+    fn route(&self, start: (i32, i32), goal: (i32, i32)) -> anyhow::Result<Route> {
         let target = self
             .node(goal.0, goal.1)
             .ok_or(anyhow!("Goal not present: {goal:?}"))?;
@@ -116,7 +144,9 @@ impl Layout {
         )
         .context("Failed to find path from {start} -> {goal}")?;
 
-        Ok(route.into_iter().map(|n| self.graph[n]).collect())
+        Ok(Route::continuously(
+            route.into_iter().map(|n| self.graph[n]),
+        ))
     }
 
     fn obstacle(&mut self, width: RangeInclusive<i32>, height: RangeInclusive<i32>) {
@@ -134,6 +164,14 @@ impl Display for Layout {
         for _ in 0..self.width {
             write!(f, "─")?;
         }
+
+        let intersections = self
+            .robots
+            .iter()
+            .tuple_combinations()
+            .flat_map(|(a, b)| a.route.intersection(&b.route))
+            .map(|loc: Location| loc.position)
+            .collect::<HashSet<_>>();
         writeln!(f, "╮")?;
         for y in 0..self.height {
             write!(f, "│")?;
@@ -142,14 +180,13 @@ impl Display for Layout {
                 match self.robots.iter().find(|r| r.position == v) {
                     Some(robot) => write!(f, "{robot}")?,
                     None => {
-                        let paths = self
+                        if intersections.contains(&v) {
+                            write!(f, "{}✕{Reset}", Fg(Magenta))?;
+                        } else if let Some(robot) = self
                             .robots
                             .iter()
-                            .filter(|r| r.route.iter().any(|n| *n == v))
-                            .collect::<Vec<_>>();
-                        if paths.len() > 1 {
-                            write!(f, "{}✕{Reset}", Fg(Magenta))?;
-                        } else if let Some(robot) = paths.first() {
+                            .find(|r| r.route.0.iter().any(|n| n.position == v))
+                        {
                             write!(f, "{}", robot.path())?;
                         } else if !self.node(v.x, v.y).is_some() {
                             // Obstacle
@@ -183,7 +220,7 @@ fn main() -> anyhow::Result<()> {
 
     // walls
     layout.obstacle(0..=12, 4..=5);
-    layout.obstacle(10..=12, 1..=5);
+    layout.obstacle(10..=11, 1..=5);
 
     layout.robots[0].route = layout.route((4, 0), (6, 9))?;
     layout.robots[1].route = layout.route((7, 3), (19, 4))?;
