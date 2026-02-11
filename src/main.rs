@@ -9,7 +9,7 @@ use clap::Parser;
 use itertools::Itertools;
 use petgraph::{Graph, algo::astar, graph::NodeIndex};
 use termion::{
-    color::{Blue, Color, Fg, Magenta, Red},
+    color::{Blue, Color, Fg, Green, Magenta, Red},
     style::Reset,
 };
 
@@ -41,7 +41,13 @@ struct Vertex {
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 struct Location {
     position: Vertex,
-    time: usize,
+    time: Time,
+}
+
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+enum Time {
+    Instant(usize),
+    Forever,
 }
 
 #[derive(Debug, Clone)]
@@ -86,12 +92,17 @@ impl Vertex {
 
 impl Route {
     fn continuously(vertices: impl Iterator<Item = Vertex>) -> Self {
-        Self(
-            vertices
-                .enumerate()
-                .map(|(time, position)| Location { position, time })
-                .collect(),
-        )
+        let mut path = vertices
+            .enumerate()
+            .map(|(time, position)| Location {
+                position,
+                time: Time::Instant(time),
+            })
+            .collect::<Vec<_>>();
+        if let Some(goal) = path.last_mut() {
+            goal.time = Time::Forever;
+        }
+        Self(path)
     }
     fn intersection(&self, other: &Self) -> Vec<Location> {
         let a = self.0.iter().copied().collect::<HashSet<_>>();
@@ -130,17 +141,17 @@ impl Layout {
         self.graph.node_indices().find(|n| self.graph[*n] == v)
     }
 
-    fn route(&self, start: (i32, i32), goal: (i32, i32)) -> anyhow::Result<Route> {
+    fn route(&self, start: Vertex, goal: Vertex) -> anyhow::Result<Route> {
         let target = self
-            .node(goal.0, goal.1)
+            .node(goal.x, goal.y)
             .ok_or(anyhow!("Goal not present: {goal:?}"))?;
         let (_, route) = astar(
             &self.graph,
-            self.node(start.0, start.1)
+            self.node(start.x, start.y)
                 .ok_or(anyhow!("Start not present: {start:?}"))?,
             |n| target == n,
             |_| 1.,
-            |n| self.graph[n].distance_squared(Vertex::new(goal.0, goal.1)),
+            |n| self.graph[n].distance_squared(goal),
         )
         .context("Failed to find path from {start} -> {goal}")?;
 
@@ -217,13 +228,15 @@ fn main() -> anyhow::Result<()> {
     // robots
     layout.robots.push(Robot::new(4, 0, Blue));
     layout.robots.push(Robot::new(7, 3, Red));
+    layout.robots.push(Robot::new(0, 9, Green));
 
     // walls
     layout.obstacle(0..=12, 4..=5);
     layout.obstacle(10..=11, 1..=5);
 
-    layout.robots[0].route = layout.route((4, 0), (6, 9))?;
-    layout.robots[1].route = layout.route((7, 3), (19, 4))?;
+    layout.robots[0].route = layout.route(layout.robots[0].position, Vertex::new(6, 9))?;
+    layout.robots[1].route = layout.route(layout.robots[1].position, Vertex::new(19, 4))?;
+    layout.robots[2].route = layout.route(layout.robots[2].position, Vertex::new(6, 9))?;
 
     print!("{layout}");
 
