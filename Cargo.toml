@@ -4,3 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+anyhow = "1.0.101"
+clap = { version = "4.5.57", features = ["derive"] }
+grid = "1.0.0"
+itertools = "0.14.0"
+nalgebra = "0.34.1"
+petgraph = "0.8.3"
+termion = "4.0.6"
