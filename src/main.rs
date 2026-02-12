@@ -183,6 +183,13 @@ impl Action {
             Self::E => Vertex::new(1, 0),
         }
     }
+
+    fn cost(&self) -> f32 {
+        match self {
+            Self::WAIT => 1.,
+            _ => 2.,
+        }
+    }
 }
 
 impl Layout {
@@ -317,7 +324,7 @@ impl Layout {
                     continue;
                 }
 
-                let tentative_g = scores[&(item.time, v)] + 1.;
+                let tentative_g = scores[&(item.time, v)] + action.cost();
                 if scores
                     .get(&(t, location.position))
                     .is_none_or(|g| tentative_g < *g)
@@ -416,9 +423,9 @@ fn main() -> anyhow::Result<()> {
     let mut layout = Layout::new(args.width, args.height);
 
     // robots
-    layout.robots.push(Robot::new(4, 0, Blue));
-    layout.robots.push(Robot::new(7, 3, Red));
-    layout.robots.push(Robot::new(2, 9, Green));
+    layout.robots.push(Robot::new(5, 0, Blue));
+    layout.robots.push(Robot::new(8, 3, Red));
+    layout.robots.push(Robot::new(19, 8, Green));
 
     // walls
     layout.obstacle(0..=12, 4..=5);
