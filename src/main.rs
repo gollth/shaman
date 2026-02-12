@@ -42,7 +42,7 @@ struct Vertex {
 }
 
 /// Position of a robot at a specific point in time
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 struct Location {
     position: Vertex,
     time: Time,
@@ -142,6 +142,7 @@ impl Route {
     }
 }
 
+/// Possible action the robot can take on a single location
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Action {
     WAIT,
@@ -200,9 +201,8 @@ impl Layout {
 
         #[derive(Debug, Clone, PartialEq, Eq)]
         struct Item {
-            vertex: Vertex,
+            location: Location,
             cost: OrderedFloat<f32>,
-            time: usize,
             came_from: Option<Box<Item>>,
         }
 
@@ -219,11 +219,14 @@ impl Layout {
 
         let mut open = BinaryHeap::new();
         let mut scores = HashMap::new();
-        scores.insert((0, start), 0.0);
+        let s = Location {
+            time: 0,
+            position: start,
+        };
+        scores.insert(s, 0.0);
         open.push(Item {
             cost: 0.0.into(),
-            time: 0,
-            vertex: start,
+            location: s,
             came_from: None,
         });
 
@@ -235,19 +238,13 @@ impl Layout {
                 "Failed to find a solution within {MAX_ITER} iterations",
             );
             i += 1;
-            if item.vertex == goal {
+            if item.location.position == goal {
                 // Reached goal
                 let mut current = Box::new(item);
                 let mut route = VecDeque::new();
-                route.push_back(Location {
-                    time: current.time,
-                    position: current.vertex,
-                });
+                route.push_back(current.location);
                 while let Some(previous) = current.came_from {
-                    route.push_front(Location {
-                        time: previous.time,
-                        position: previous.vertex,
-                    });
+                    route.push_front(previous.location);
                     current = previous;
                 }
                 return Ok(Route::standing_at_goal(route.into_iter()));
@@ -255,21 +252,23 @@ impl Layout {
 
             // Node expansion
             for action in &Action::ALL {
-                let t = item.time + 1;
-                // let v = item.vertex;
-                let location = Location {
-                    time: item.time + 1,
-                    position: item.vertex + action.direction(),
+                let now = item.location.time;
+                let then = now + 1;
+                let here = item.location.position;
+                let there = here + action.direction();
+                let candidate = Location {
+                    position: there,
+                    time: then,
                 };
-                if !self.space.contains(&location.position) {
+                if !self.space.contains(&there) {
                     // candidate not reachable
                     continue;
                 }
 
                 // Same location constraint check
                 if constraints
-                    .at(t)
-                    .is_some_and(|obstacle| obstacle == location.position)
+                    .at(then)
+                    .is_some_and(|obstacle| obstacle == candidate.position)
                 {
                     // candidate would collide with a priority constraint in the future
                     continue;
@@ -277,27 +276,23 @@ impl Layout {
 
                 // Swapping location constraint check
                 if constraints
-                    .at(item.time)
-                    .zip(constraints.at(t))
-                    .is_some_and(|(now, next)| now == location.position && next == item.vertex)
+                    .at(now)
+                    .zip(constraints.at(then))
+                    .is_some_and(|(now, then)| now == there && then == here)
                 {
                     // candidate would switch location with the priority constraint
                     continue;
                 }
 
-                let tentative_g = scores[&(item.time, item.vertex)] + action.cost();
-                if scores
-                    .get(&(t, location.position))
-                    .is_none_or(|g| tentative_g < *g)
-                {
-                    scores.insert((t, location.position), tentative_g);
+                let tentative_g = scores[&item.location] + action.cost();
+                if scores.get(&candidate).is_none_or(|g| tentative_g < *g) {
+                    scores.insert(candidate, tentative_g);
                     // valid candidate
-                    let h = location.position.distance_squared(goal);
+                    let h = candidate.position.distance_squared(goal);
                     // println!("  + {action:?} => {tentative_g} + {h}");
                     let item = Item {
                         cost: OrderedFloat(tentative_g + h),
-                        vertex: location.position,
-                        time: t,
+                        location: candidate,
                         came_from: Some(Box::new(item.clone())),
                     };
                     open.push(item);
