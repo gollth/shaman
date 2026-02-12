@@ -133,12 +133,19 @@ impl Route {
     fn standing_at_goal(locations: impl Iterator<Item = Location>) -> Self {
         Self(locations.collect())
     }
-    fn intersection(&self, other: &Self) -> Vec<Location> {
-        // TODO: This does not cover goal conflicts anymore, because `Time::Range` is not properly
-        // hashed: Maybe ignore last element and manually add it to the intersection?
+    fn intersection(&self, other: &Self) -> Vec<Vertex> {
         let a = self.0.iter().cloned().collect::<HashSet<_>>();
         let b = other.0.iter().cloned().collect::<HashSet<_>>();
-        a.intersection(&b).cloned().collect()
+        a.intersection(&b)
+            .map(|l| l.position)
+            .chain(
+                self.0
+                    .back()
+                    .zip(other.0.back())
+                    .filter(|(a, b)| a.position == b.position)
+                    .map(|(a, _)| a.position),
+            )
+            .collect()
     }
 }
 
@@ -335,7 +342,6 @@ impl Display for Layout {
             .iter()
             .tuple_combinations()
             .flat_map(|(a, b)| a.route.intersection(&b.route))
-            .map(|loc: Location| loc.position)
             .collect::<HashSet<_>>();
         writeln!(f, "╮")?;
         for y in 0..self.height {
@@ -383,6 +389,7 @@ fn main() -> anyhow::Result<()> {
     layout.robots.push(Robot::new(5, 0, Blue));
     layout.robots.push(Robot::new(8, 3, Red));
     layout.robots.push(Robot::new(19, 8, Green));
+    layout.robots.push(Robot::new(0, 9, Yellow));
 
     // walls
     layout.obstacle(0..=12, 4..=5);
@@ -398,6 +405,11 @@ fn main() -> anyhow::Result<()> {
     layout.robots[2].route = layout.route_with(
         layout.robots[2].position,
         Vertex::new(5, 0),
+        (&layout.robots[0].route).into(),
+    )?;
+    layout.robots[3].route = layout.route_with(
+        layout.robots[3].position,
+        Vertex::new(6, 9),
         (&layout.robots[0].route).into(),
     )?;
 
