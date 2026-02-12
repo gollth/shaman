@@ -1,13 +1,14 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BinaryHeap, HashMap, HashSet, VecDeque},
     fmt::Display,
-    ops::RangeInclusive,
+    ops::{Add, RangeInclusive},
 };
 
-use anyhow::{Context, anyhow};
+use anyhow::anyhow;
 use clap::Parser;
 use itertools::Itertools;
-use petgraph::{Graph, algo::astar, graph::NodeIndex};
+use ordered_float::OrderedFloat;
+use petgraph::{Graph, graph::NodeIndex};
 use termion::{
     color::{Blue, Color, Fg, Green, Magenta, Red},
     style::Reset,
@@ -81,12 +82,23 @@ impl Display for Robot {
 }
 
 impl Vertex {
-    fn new(x: i32, y: i32) -> Self {
+    const fn new(x: i32, y: i32) -> Self {
         Self { x, y }
     }
 
     fn distance_squared(&self, other: Self) -> f32 {
         ((self.x - other.x) as f32).powi(2) + ((self.y - other.y) as f32).powi(2)
+    }
+}
+
+impl Add for Vertex {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self::Output {
+        Self {
+            x: self.x + other.x,
+            y: self.y + other.y,
+        }
     }
 }
 
@@ -136,34 +148,96 @@ impl Layout {
         }
     }
 
-    fn node(&self, x: i32, y: i32) -> Option<NodeIndex> {
-        let v = Vertex::new(x, y);
+    fn node(&self, v: Vertex) -> Option<NodeIndex> {
         self.graph.node_indices().find(|n| self.graph[*n] == v)
     }
 
     fn route(&self, start: Vertex, goal: Vertex) -> anyhow::Result<Route> {
         let target = self
-            .node(goal.x, goal.y)
+            .node(goal)
             .ok_or(anyhow!("Goal not present: {goal:?}"))?;
-        let (_, route) = astar(
-            &self.graph,
-            self.node(start.x, start.y)
-                .ok_or(anyhow!("Start not present: {start:?}"))?,
-            |n| target == n,
-            |_| 1.,
-            |n| self.graph[n].distance_squared(goal),
-        )
-        .context("Failed to find path from {start} -> {goal}")?;
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        struct Item {
+            n: NodeIndex,
+            cost: OrderedFloat<f32>,
+            time: usize,
+        }
 
-        Ok(Route::continuously(
-            route.into_iter().map(|n| self.graph[n]),
-        ))
+        impl Ord for Item {
+            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                other.cost.cmp(&self.cost) // reverse for min heap
+            }
+        }
+        impl PartialOrd for Item {
+            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                Some(self.cmp(other))
+            }
+        }
+
+        const N: Vertex = Vertex::new(0, -1);
+        const S: Vertex = Vertex::new(0, 1);
+        const W: Vertex = Vertex::new(-1, 0);
+        const E: Vertex = Vertex::new(1, 0);
+        const WAIT: Vertex = Vertex::new(0, 0);
+
+        let mut open = BinaryHeap::new();
+        let mut scores = HashMap::new();
+        let mut routing_table = HashMap::<NodeIndex, NodeIndex>::new();
+        let start = self
+            .node(start)
+            .ok_or(anyhow!("Start not present or free: {start:?}"))?;
+        scores.insert(start, 0.0);
+        open.push(Item {
+            cost: 0.0.into(),
+            time: 0,
+            n: start,
+        });
+
+        while let Some(item) = open.pop() {
+            if item.n == target {
+                // Reached goal
+                let mut current = item.n;
+                let mut route = VecDeque::new();
+                route.push_back(target);
+                while let Some(previous) = routing_table.get(&current).copied() {
+                    route.push_front(previous);
+                    current = previous;
+                }
+                return Ok(Route::continuously(
+                    route.into_iter().map(|n| self.graph[n]),
+                ));
+            }
+
+            // Node expansion
+            for action in &[N, W, S, E, WAIT] {
+                let Some(candidate) = self.node(self.graph[item.n] + *action) else {
+                    // candidate not reachable
+                    continue;
+                };
+
+                let tentative_g = scores[&item.n] + 1.0;
+                if scores.get(&candidate).is_none_or(|g| tentative_g < *g) {
+                    scores.insert(candidate, tentative_g);
+                    // valid candidate
+                    let h = self.graph[candidate].distance_squared(goal);
+                    routing_table.insert(candidate, item.n);
+                    let item = Item {
+                        cost: OrderedFloat(tentative_g + h),
+                        n: candidate,
+                        time: item.time + 1,
+                    };
+                    open.push(item);
+                }
+            }
+        }
+
+        Err(anyhow!("Failed to find path from {start:?} -> {goal:?}"))
     }
 
     fn obstacle(&mut self, width: RangeInclusive<i32>, height: RangeInclusive<i32>) {
         let removals = width
             .cartesian_product(height)
-            .filter_map(|(x, y)| self.node(x, y))
+            .filter_map(|(x, y)| self.node(Vertex::new(x, y)))
             .collect::<HashSet<_>>();
         self.graph.retain_nodes(|_, n| !removals.contains(&n));
     }
@@ -199,7 +273,7 @@ impl Display for Layout {
                             .find(|r| r.route.0.iter().any(|n| n.position == v))
                         {
                             write!(f, "{}", robot.path())?;
-                        } else if !self.node(v.x, v.y).is_some() {
+                        } else if !self.node(v).is_some() {
                             // Obstacle
                             write!(f, "█")?;
                         } else {
