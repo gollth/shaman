@@ -1,11 +1,12 @@
 use std::{
     collections::{BinaryHeap, HashMap, HashSet, VecDeque},
     fmt::Display,
-    ops::{Add, RangeInclusive},
+    ops::{Add, RangeFrom, RangeInclusive},
 };
 
 use anyhow::anyhow;
 use clap::Parser;
+use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use ordered_float::OrderedFloat;
 use petgraph::{Graph, graph::NodeIndex};
@@ -39,16 +40,16 @@ struct Vertex {
 }
 
 /// Position of a robot at a specific point in time
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 struct Location {
     position: Vertex,
     time: Time,
 }
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Hash, EnumAsInner, PartialEq, Eq)]
 enum Time {
     Instant(usize),
-    Forever,
+    Range(RangeFrom<usize>),
 }
 
 #[derive(Debug, Clone)]
@@ -60,6 +61,44 @@ struct Robot {
 
 #[derive(Debug, Clone, Default)]
 struct Route(Vec<Location>);
+
+#[derive(Debug, Clone, Default)]
+struct PriorityConstraints {
+    temporary: HashMap<usize, Vertex>,
+    permanent: Vec<(RangeFrom<usize>, Vertex)>,
+}
+impl From<&Route> for PriorityConstraints {
+    fn from(route: &Route) -> Self {
+        let temporary = route
+            .0
+            .iter()
+            .filter_map(|l| Some((l.time.as_instant().copied()?, l.position)))
+            .collect();
+        let permanent = route
+            .0
+            .iter()
+            .filter_map(|l| Some((l.time.as_range().cloned()?, l.position)))
+            .collect();
+
+        Self {
+            temporary,
+            permanent,
+        }
+    }
+}
+
+impl PriorityConstraints {
+    fn at(&self, time: usize) -> Option<Vertex> {
+        self.temporary
+            .get(&time)
+            .or_else(|| {
+                self.permanent
+                    .iter()
+                    .find_map(|(range, v)| range.contains(&time).then_some(v))
+            })
+            .copied()
+    }
+}
 
 impl Robot {
     fn new<C: Color>(x: i32, y: i32, color: C) -> Self {
@@ -103,23 +142,19 @@ impl Add for Vertex {
 }
 
 impl Route {
-    fn continuously(vertices: impl Iterator<Item = Vertex>) -> Self {
-        let mut path = vertices
-            .enumerate()
-            .map(|(time, position)| Location {
-                position,
-                time: Time::Instant(time),
-            })
-            .collect::<Vec<_>>();
+    fn standing_at_goal(locations: impl Iterator<Item = Location>) -> Self {
+        let mut path = locations.collect::<Vec<_>>();
         if let Some(goal) = path.last_mut() {
-            goal.time = Time::Forever;
+            goal.time = Time::Range(goal.time.as_instant().copied().unwrap_or_default()..);
         }
         Self(path)
     }
     fn intersection(&self, other: &Self) -> Vec<Location> {
-        let a = self.0.iter().copied().collect::<HashSet<_>>();
-        let b = other.0.iter().copied().collect::<HashSet<_>>();
-        a.intersection(&b).copied().collect()
+        // TODO: This does not cover goal conflicts anymore, because `Time::Range` is not properly
+        // hashed
+        let a = self.0.iter().cloned().collect::<HashSet<_>>();
+        let b = other.0.iter().cloned().collect::<HashSet<_>>();
+        a.intersection(&b).cloned().collect()
     }
 }
 
@@ -153,6 +188,15 @@ impl Layout {
     }
 
     fn route(&self, start: Vertex, goal: Vertex) -> anyhow::Result<Route> {
+        self.route_with(start, goal, PriorityConstraints::default())
+    }
+
+    fn route_with(
+        &self,
+        start: Vertex,
+        goal: Vertex,
+        constraints: PriorityConstraints,
+    ) -> anyhow::Result<Route> {
         let target = self
             .node(goal)
             .ok_or(anyhow!("Goal not present: {goal:?}"))?;
@@ -161,6 +205,7 @@ impl Layout {
             n: NodeIndex,
             cost: OrderedFloat<f32>,
             time: usize,
+            came_from: Option<Box<Item>>,
         }
 
         impl Ord for Item {
@@ -182,7 +227,6 @@ impl Layout {
 
         let mut open = BinaryHeap::new();
         let mut scores = HashMap::new();
-        let mut routing_table = HashMap::<NodeIndex, NodeIndex>::new();
         let start = self
             .node(start)
             .ok_or(anyhow!("Start not present or free: {start:?}"))?;
@@ -191,40 +235,59 @@ impl Layout {
             cost: 0.0.into(),
             time: 0,
             n: start,
+            came_from: None,
         });
 
         while let Some(item) = open.pop() {
             if item.n == target {
                 // Reached goal
-                let mut current = item.n;
+                let mut current = Box::new(item);
                 let mut route = VecDeque::new();
-                route.push_back(target);
-                while let Some(previous) = routing_table.get(&current).copied() {
-                    route.push_front(previous);
+                route.push_back(Location {
+                    time: Time::Range(current.time..),
+                    position: self.graph[current.n],
+                });
+                while let Some(previous) = current.came_from {
+                    route.push_front(Location {
+                        time: Time::Instant(previous.time),
+                        position: self.graph[previous.n],
+                    });
                     current = previous;
                 }
-                return Ok(Route::continuously(
-                    route.into_iter().map(|n| self.graph[n]),
-                ));
+                return Ok(Route::standing_at_goal(route.into_iter()));
             }
 
             // Node expansion
             for action in &[N, W, S, E, WAIT] {
-                let Some(candidate) = self.node(self.graph[item.n] + *action) else {
+                let t = item.time + 1;
+                let v = self.graph[item.n];
+                let location = Location {
+                    time: Time::Instant(t),
+                    position: v + *action,
+                };
+                let Some(candidate) = self.node(location.position) else {
                     // candidate not reachable
                     continue;
                 };
 
-                let tentative_g = scores[&item.n] + 1.0;
+                if constraints
+                    .at(t)
+                    .is_some_and(|obstacle| obstacle == location.position)
+                {
+                    // candidate would collide with a priority constraint in the future
+                    continue;
+                }
+
+                let tentative_g = scores[&item.n] + 1.;
                 if scores.get(&candidate).is_none_or(|g| tentative_g < *g) {
                     scores.insert(candidate, tentative_g);
                     // valid candidate
                     let h = self.graph[candidate].distance_squared(goal);
-                    routing_table.insert(candidate, item.n);
                     let item = Item {
                         cost: OrderedFloat(tentative_g + h),
                         n: candidate,
-                        time: item.time + 1,
+                        time: t,
+                        came_from: Some(Box::new(item.clone())),
                     };
                     open.push(item);
                 }
@@ -302,17 +365,27 @@ fn main() -> anyhow::Result<()> {
     // robots
     layout.robots.push(Robot::new(4, 0, Blue));
     layout.robots.push(Robot::new(7, 3, Red));
-    layout.robots.push(Robot::new(0, 9, Green));
+    // layout.robots.push(Robot::new(0, 9, Green));
 
     // walls
     layout.obstacle(0..=12, 4..=5);
     layout.obstacle(10..=11, 1..=5);
 
-    layout.robots[0].route = layout.route(layout.robots[0].position, Vertex::new(6, 9))?;
-    layout.robots[1].route = layout.route(layout.robots[1].position, Vertex::new(19, 4))?;
-    layout.robots[2].route = layout.route(layout.robots[2].position, Vertex::new(6, 9))?;
+    // layout.robots[0].route = layout.route(layout.robots[0].position, Vertex::new(6, 9))?;
+    layout.robots[0].route = layout.route(layout.robots[0].position, Vertex::new(12, 2))?;
+    layout.robots[1].route = layout.route_with(
+        layout.robots[1].position,
+        Vertex::new(16, 0),
+        PriorityConstraints::from(&layout.robots[0].route),
+    )?;
+
+    // layout.robots[2].route = layout.route(layout.robots[2].position, Vertex::new(6, 9))?;
 
     print!("{layout}");
+
+    // for l in layout.robots[1].route.0.iter() {
+    //     println!("> {:?}: {}/{}", l.time, l.position.x, l.position.y);
+    // }
 
     Ok(())
 }
