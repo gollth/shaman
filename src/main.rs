@@ -162,6 +162,29 @@ impl Route {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Action {
+    WAIT,
+    N,
+    W,
+    E,
+    S,
+}
+
+impl Action {
+    const ALL: [Self; 5] = [Self::N, Self::W, Self::S, Self::E, Self::WAIT];
+
+    fn direction(&self) -> Vertex {
+        match self {
+            Self::WAIT => Vertex::new(0, 0),
+            Self::N => Vertex::new(0, -1),
+            Self::S => Vertex::new(0, 1),
+            Self::W => Vertex::new(-1, 0),
+            Self::E => Vertex::new(1, 0),
+        }
+    }
+}
+
 impl Layout {
     fn new(width: usize, height: usize) -> Self {
         let mut graph = Graph::new();
@@ -223,18 +246,12 @@ impl Layout {
             }
         }
 
-        const N: Vertex = Vertex::new(0, -1);
-        const S: Vertex = Vertex::new(0, 1);
-        const W: Vertex = Vertex::new(-1, 0);
-        const E: Vertex = Vertex::new(1, 0);
-        const WAIT: Vertex = Vertex::new(0, 0);
-
         let mut open = BinaryHeap::new();
         let mut scores = HashMap::new();
+        scores.insert((0, start), 0.0);
         let start = self
             .node(start)
             .ok_or(anyhow!("Start not present or free: {start:?}"))?;
-        scores.insert(start, 0.0);
         open.push(Item {
             cost: 0.0.into(),
             time: 0,
@@ -242,7 +259,14 @@ impl Layout {
             came_from: None,
         });
 
+        const MAX_ITER: usize = 10000;
+        let mut i = 0;
         while let Some(item) = open.pop() {
+            anyhow::ensure!(
+                i < MAX_ITER,
+                "Failed to find a solution within {MAX_ITER} iterations",
+            );
+            i += 1;
             if item.n == target {
                 // Reached goal
                 let mut current = Box::new(item);
@@ -262,18 +286,19 @@ impl Layout {
             }
 
             // Node expansion
-            for action in &[N, W, S, E, WAIT] {
+            for action in &Action::ALL {
                 let t = item.time + 1;
                 let v = self.graph[item.n];
                 let location = Location {
                     time: Time::Instant(t),
-                    position: v + *action,
+                    position: v + action.direction(),
                 };
                 let Some(candidate) = self.node(location.position) else {
                     // candidate not reachable
                     continue;
                 };
 
+                // Same location constraint check
                 if constraints
                     .at(t)
                     .is_some_and(|obstacle| obstacle == location.position)
@@ -282,11 +307,25 @@ impl Layout {
                     continue;
                 }
 
-                let tentative_g = scores[&item.n] + 1.;
-                if scores.get(&candidate).is_none_or(|g| tentative_g < *g) {
-                    scores.insert(candidate, tentative_g);
+                // Swapping location constraint check
+                if constraints
+                    .at(item.time)
+                    .zip(constraints.at(t))
+                    .is_some_and(|(now, next)| now == location.position && next == v)
+                {
+                    // candidate would switch location with the priority constraint
+                    continue;
+                }
+
+                let tentative_g = scores[&(item.time, v)] + 1.;
+                if scores
+                    .get(&(t, location.position))
+                    .is_none_or(|g| tentative_g < *g)
+                {
+                    scores.insert((t, location.position), tentative_g);
                     // valid candidate
                     let h = self.graph[candidate].distance_squared(goal);
+                    // println!("  + {action:?} => {tentative_g} + {h}");
                     let item = Item {
                         cost: OrderedFloat(tentative_g + h),
                         n: candidate,
@@ -379,21 +418,24 @@ fn main() -> anyhow::Result<()> {
     // robots
     layout.robots.push(Robot::new(4, 0, Blue));
     layout.robots.push(Robot::new(7, 3, Red));
-    // layout.robots.push(Robot::new(0, 9, Green));
+    layout.robots.push(Robot::new(2, 9, Green));
 
     // walls
     layout.obstacle(0..=12, 4..=5);
     layout.obstacle(10..=11, 1..=5);
+    layout.obstacle(14..=19, 4..=5);
 
-    // layout.robots[0].route = layout.route(layout.robots[0].position, Vertex::new(6, 9))?;
-    layout.robots[0].route = layout.route(layout.robots[0].position, Vertex::new(12, 2))?;
+    layout.robots[0].route = layout.route(layout.robots[0].position, Vertex::new(6, 9))?;
     layout.robots[1].route = layout.route_with(
         layout.robots[1].position,
-        Vertex::new(16, 0),
-        PriorityConstraints::from(&layout.robots[0].route),
+        Vertex::new(19, 3),
+        (&layout.robots[0].route).into(),
     )?;
-
-    // layout.robots[2].route = layout.route(layout.robots[2].position, Vertex::new(6, 9))?;
+    layout.robots[2].route = layout.route_with(
+        layout.robots[2].position,
+        Vertex::new(5, 0),
+        (&layout.robots[0].route).into(),
+    )?;
 
     if args.fps == 0. {
         println!("{layout}");
