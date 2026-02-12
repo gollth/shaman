@@ -9,7 +9,6 @@ use anyhow::anyhow;
 use clap::Parser;
 use itertools::Itertools;
 use ordered_float::OrderedFloat;
-use petgraph::{Graph, graph::NodeIndex};
 use termion::{color::*, cursor, style::Reset};
 
 #[derive(Debug, Parser)]
@@ -32,7 +31,7 @@ struct Layout {
     width: usize,
     height: usize,
     robots: Vec<Robot>,
-    graph: Graph<Vertex, ()>,
+    space: HashSet<Vertex>,
 }
 
 /// Position of each cell in the layout/graph
@@ -174,32 +173,16 @@ impl Action {
 }
 
 impl Layout {
-    fn new(width: usize, height: usize) -> Self {
-        let mut graph = Graph::new();
-        let mut cache = HashMap::new();
-        for (x, y) in (0..width).cartesian_product(0..height) {
-            let v = Vertex::new(x as i32, y as i32);
-            cache.insert((v.x, v.y), graph.add_node(v));
-        }
-
-        for ((x, y), node) in cache.iter() {
-            for (i, j) in &[(-1, 0), (1, 0), (0, -1), (0, 1)] {
-                let neighbor = (x + i, y + j);
-                if let Some(n) = cache.get(&neighbor).copied() {
-                    graph.add_edge(*node, n, ());
-                }
-            }
-        }
+    fn empty(width: usize, height: usize) -> Self {
         Self {
-            graph,
+            space: (0..width)
+                .cartesian_product(0..height)
+                .map(|(x, y)| Vertex::new(x as i32, y as i32))
+                .collect(),
             width,
             height,
             robots: Default::default(),
         }
-    }
-
-    fn node(&self, v: Vertex) -> Option<NodeIndex> {
-        self.graph.node_indices().find(|n| self.graph[*n] == v)
     }
 
     fn route(&self, start: Vertex, goal: Vertex) -> anyhow::Result<Route> {
@@ -212,12 +195,12 @@ impl Layout {
         goal: Vertex,
         constraints: PriorityConstraints,
     ) -> anyhow::Result<Route> {
-        let target = self
-            .node(goal)
-            .ok_or(anyhow!("Goal not present: {goal:?}"))?;
+        anyhow::ensure!(self.space.contains(&start), "Start not free: {goal:?}");
+        anyhow::ensure!(self.space.contains(&goal), "Goal not free: {goal:?}");
+
         #[derive(Debug, Clone, PartialEq, Eq)]
         struct Item {
-            n: NodeIndex,
+            vertex: Vertex,
             cost: OrderedFloat<f32>,
             time: usize,
             came_from: Option<Box<Item>>,
@@ -237,13 +220,10 @@ impl Layout {
         let mut open = BinaryHeap::new();
         let mut scores = HashMap::new();
         scores.insert((0, start), 0.0);
-        let start = self
-            .node(start)
-            .ok_or(anyhow!("Start not present or free: {start:?}"))?;
         open.push(Item {
             cost: 0.0.into(),
             time: 0,
-            n: start,
+            vertex: start,
             came_from: None,
         });
 
@@ -255,18 +235,18 @@ impl Layout {
                 "Failed to find a solution within {MAX_ITER} iterations",
             );
             i += 1;
-            if item.n == target {
+            if item.vertex == goal {
                 // Reached goal
                 let mut current = Box::new(item);
                 let mut route = VecDeque::new();
                 route.push_back(Location {
                     time: current.time,
-                    position: self.graph[current.n],
+                    position: current.vertex,
                 });
                 while let Some(previous) = current.came_from {
                     route.push_front(Location {
                         time: previous.time,
-                        position: self.graph[previous.n],
+                        position: previous.vertex,
                     });
                     current = previous;
                 }
@@ -276,15 +256,15 @@ impl Layout {
             // Node expansion
             for action in &Action::ALL {
                 let t = item.time + 1;
-                let v = self.graph[item.n];
+                // let v = item.vertex;
                 let location = Location {
-                    time: t,
-                    position: v + action.direction(),
+                    time: item.time + 1,
+                    position: item.vertex + action.direction(),
                 };
-                let Some(candidate) = self.node(location.position) else {
+                if !self.space.contains(&location.position) {
                     // candidate not reachable
                     continue;
-                };
+                }
 
                 // Same location constraint check
                 if constraints
@@ -299,24 +279,24 @@ impl Layout {
                 if constraints
                     .at(item.time)
                     .zip(constraints.at(t))
-                    .is_some_and(|(now, next)| now == location.position && next == v)
+                    .is_some_and(|(now, next)| now == location.position && next == item.vertex)
                 {
                     // candidate would switch location with the priority constraint
                     continue;
                 }
 
-                let tentative_g = scores[&(item.time, v)] + action.cost();
+                let tentative_g = scores[&(item.time, item.vertex)] + action.cost();
                 if scores
                     .get(&(t, location.position))
                     .is_none_or(|g| tentative_g < *g)
                 {
                     scores.insert((t, location.position), tentative_g);
                     // valid candidate
-                    let h = self.graph[candidate].distance_squared(goal);
+                    let h = location.position.distance_squared(goal);
                     // println!("  + {action:?} => {tentative_g} + {h}");
                     let item = Item {
                         cost: OrderedFloat(tentative_g + h),
-                        n: candidate,
+                        vertex: location.position,
                         time: t,
                         came_from: Some(Box::new(item.clone())),
                     };
@@ -329,11 +309,12 @@ impl Layout {
     }
 
     fn obstacle(&mut self, width: RangeInclusive<i32>, height: RangeInclusive<i32>) {
-        let removals = width
+        for vertex in width
             .cartesian_product(height)
-            .filter_map(|(x, y)| self.node(Vertex::new(x, y)))
-            .collect::<HashSet<_>>();
-        self.graph.retain_nodes(|_, n| !removals.contains(&n));
+            .map(|(x, y)| Vertex::new(x, y))
+        {
+            self.space.remove(&vertex);
+        }
     }
 
     fn simulate(&mut self) {
@@ -377,7 +358,7 @@ impl Display for Layout {
                             .find(|r| r.route.0.iter().any(|n| n.position == v))
                         {
                             write!(f, "{}", robot.path())?;
-                        } else if !self.node(v).is_some() {
+                        } else if !self.space.contains(&v) {
                             // Obstacle
                             write!(f, "█")?;
                         } else {
@@ -401,7 +382,7 @@ impl Display for Layout {
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    let mut layout = Layout::new(args.width, args.height);
+    let mut layout = Layout::empty(args.width, args.height);
 
     // robots
     layout.robots.push(Robot::new(5, 0, Blue));
