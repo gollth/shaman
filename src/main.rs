@@ -2,6 +2,7 @@ use std::{
     collections::{BinaryHeap, HashMap, HashSet, VecDeque},
     fmt::Display,
     ops::{Add, RangeFrom, RangeInclusive},
+    time::Duration,
 };
 
 use anyhow::anyhow;
@@ -10,18 +11,21 @@ use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use ordered_float::OrderedFloat;
 use petgraph::{Graph, graph::NodeIndex};
-use termion::{
-    color::{Blue, Color, Fg, Green, Magenta, Red},
-    style::Reset,
-};
+use termion::{color::*, cursor, style::Reset};
 
 #[derive(Debug, Parser)]
 struct Args {
+    /// Amount of colums of the grid
     #[arg(long, default_value_t = 20)]
     width: usize,
 
+    /// Amount of rows of the grid
     #[arg(long, default_value_t = 10)]
     height: usize,
+
+    /// How fast to simulate
+    #[arg(short, long, default_value_t = 0.)]
+    fps: f32,
 }
 
 #[derive(Debug)]
@@ -60,7 +64,7 @@ struct Robot {
 }
 
 #[derive(Debug, Clone, Default)]
-struct Route(Vec<Location>);
+struct Route(VecDeque<Location>);
 
 #[derive(Debug, Clone, Default)]
 struct PriorityConstraints {
@@ -143,8 +147,8 @@ impl Add for Vertex {
 
 impl Route {
     fn standing_at_goal(locations: impl Iterator<Item = Location>) -> Self {
-        let mut path = locations.collect::<Vec<_>>();
-        if let Some(goal) = path.last_mut() {
+        let mut path = locations.collect::<VecDeque<_>>();
+        if let Some(goal) = path.back_mut() {
             goal.time = Time::Range(goal.time.as_instant().copied().unwrap_or_default()..);
         }
         Self(path)
@@ -304,6 +308,16 @@ impl Layout {
             .collect::<HashSet<_>>();
         self.graph.retain_nodes(|_, n| !removals.contains(&n));
     }
+
+    fn simulate(&mut self) {
+        for robot in &mut self.robots {
+            let Some(next) = robot.route.0.pop_front() else {
+                continue;
+            };
+
+            robot.position = next.position;
+        }
+    }
 }
 
 impl Display for Layout {
@@ -381,11 +395,29 @@ fn main() -> anyhow::Result<()> {
 
     // layout.robots[2].route = layout.route(layout.robots[2].position, Vertex::new(6, 9))?;
 
-    print!("{layout}");
+    if args.fps == 0. {
+        println!("{layout}");
+        return Ok(());
+    }
 
-    // for l in layout.robots[1].route.0.iter() {
-    //     println!("> {:?}: {}/{}", l.time, l.position.x, l.position.y);
-    // }
+    let dt = Duration::from_secs_f32(1. / args.fps);
+    let steps = layout
+        .robots
+        .iter()
+        .map(|r| r.route.0.len())
+        .max()
+        .unwrap_or_default();
+    print!("{}", cursor::Hide);
+    for _ in 0..steps {
+        layout.simulate();
+        print!(
+            "{layout}{}{}",
+            cursor::Left(layout.width as u16 + 2),
+            cursor::Up(layout.height as u16 + 2)
+        );
+        std::thread::sleep(dt);
+    }
+    print!("{layout}{}", cursor::Show);
 
     Ok(())
 }
