@@ -7,7 +7,6 @@ use std::{
 
 use anyhow::anyhow;
 use clap::Parser;
-use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use ordered_float::OrderedFloat;
 use petgraph::{Graph, graph::NodeIndex};
@@ -50,11 +49,7 @@ struct Location {
     time: Time,
 }
 
-#[derive(Debug, Clone, Hash, EnumAsInner, PartialEq, Eq)]
-enum Time {
-    Instant(usize),
-    Range(RangeFrom<usize>),
-}
+type Time = usize;
 
 #[derive(Debug, Clone)]
 struct Robot {
@@ -69,24 +64,14 @@ struct Route(VecDeque<Location>);
 #[derive(Debug, Clone, Default)]
 struct PriorityConstraints {
     temporary: HashMap<usize, Vertex>,
-    permanent: Vec<(RangeFrom<usize>, Vertex)>,
+    permanent: Option<(RangeFrom<usize>, Vertex)>,
 }
+
 impl From<&Route> for PriorityConstraints {
     fn from(route: &Route) -> Self {
-        let temporary = route
-            .0
-            .iter()
-            .filter_map(|l| Some((l.time.as_instant().copied()?, l.position)))
-            .collect();
-        let permanent = route
-            .0
-            .iter()
-            .filter_map(|l| Some((l.time.as_range().cloned()?, l.position)))
-            .collect();
-
         Self {
-            temporary,
-            permanent,
+            temporary: route.0.iter().map(|l| (l.time, l.position)).collect(),
+            permanent: route.0.back().map(|l| (l.time.., l.position)),
         }
     }
 }
@@ -147,15 +132,11 @@ impl Add for Vertex {
 
 impl Route {
     fn standing_at_goal(locations: impl Iterator<Item = Location>) -> Self {
-        let mut path = locations.collect::<VecDeque<_>>();
-        if let Some(goal) = path.back_mut() {
-            goal.time = Time::Range(goal.time.as_instant().copied().unwrap_or_default()..);
-        }
-        Self(path)
+        Self(locations.collect())
     }
     fn intersection(&self, other: &Self) -> Vec<Location> {
         // TODO: This does not cover goal conflicts anymore, because `Time::Range` is not properly
-        // hashed
+        // hashed: Maybe ignore last element and manually add it to the intersection?
         let a = self.0.iter().cloned().collect::<HashSet<_>>();
         let b = other.0.iter().cloned().collect::<HashSet<_>>();
         a.intersection(&b).cloned().collect()
@@ -279,12 +260,12 @@ impl Layout {
                 let mut current = Box::new(item);
                 let mut route = VecDeque::new();
                 route.push_back(Location {
-                    time: Time::Range(current.time..),
+                    time: current.time,
                     position: self.graph[current.n],
                 });
                 while let Some(previous) = current.came_from {
                     route.push_front(Location {
-                        time: Time::Instant(previous.time),
+                        time: previous.time,
                         position: self.graph[previous.n],
                     });
                     current = previous;
@@ -297,7 +278,7 @@ impl Layout {
                 let t = item.time + 1;
                 let v = self.graph[item.n];
                 let location = Location {
-                    time: Time::Instant(t),
+                    time: t,
                     position: v + action.direction(),
                 };
                 let Some(candidate) = self.node(location.position) else {
