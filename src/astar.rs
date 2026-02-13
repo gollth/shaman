@@ -47,8 +47,9 @@ impl From<&Route> for RightOfWay {
 }
 
 /// Possible action the robot can take on a single location
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Action {
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Action {
+    #[default]
     WAIT,
     N,
     W,
@@ -57,9 +58,9 @@ enum Action {
 }
 
 impl Action {
-    const ALL: [Self; 5] = [Self::N, Self::W, Self::S, Self::E, Self::WAIT];
+    pub const ALL: [Self; 5] = [Self::N, Self::W, Self::S, Self::E, Self::WAIT];
 
-    fn direction(&self) -> Vertex {
+    pub fn direction(&self) -> Vertex {
         match self {
             Self::WAIT => Vertex::new(0, 0),
             Self::N => Vertex::new(0, -1),
@@ -69,10 +70,11 @@ impl Action {
         }
     }
 
-    fn cost(&self) -> f32 {
-        match self {
-            Self::WAIT => 1.,
-            _ => 2.,
+    fn cost(&self, previous: Self) -> f32 {
+        match (self, previous) {
+            (Self::WAIT, _) => 1.,
+            (a, b) if *a == b => 2.,
+            _ => 5.,
         }
     }
 }
@@ -158,8 +160,13 @@ pub fn solve(
                 // candidate would switch location with the priority constraint
                 continue;
             }
+            let previous_action = item
+                .came_from
+                .as_ref()
+                .map(|prev| here - prev.location.position)
+                .unwrap_or_default();
 
-            let tentative_g = scores[&item.location] + action.cost();
+            let tentative_g = scores[&item.location] + action.cost(previous_action);
             if scores.get(&candidate).is_none_or(|g| tentative_g < *g) {
                 scores.insert(candidate, tentative_g);
                 // valid candidate

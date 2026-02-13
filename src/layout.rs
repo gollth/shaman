@@ -1,5 +1,11 @@
 use itertools::Itertools;
-use std::{collections::HashSet, fmt::Display, ops::Add};
+use std::{
+    collections::HashSet,
+    fmt::Display,
+    ops::{Add, Sub},
+};
+
+use crate::astar::Action;
 
 /// The definition of the 2D grid space, with free & blocked cells
 #[derive(Debug)]
@@ -39,6 +45,19 @@ impl Add for Vertex {
             x: self.x + other.x,
             y: self.y + other.y,
         }
+    }
+}
+
+impl Sub for Vertex {
+    type Output = Action;
+
+    fn sub(self, other: Self) -> Self::Output {
+        let d = Self::new(self.x - other.x, self.y - other.y);
+        Action::ALL
+            .iter()
+            .copied()
+            .find(|a| a.direction() == d)
+            .unwrap_or_default()
     }
 }
 
