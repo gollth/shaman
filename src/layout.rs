@@ -1,16 +1,16 @@
 use itertools::Itertools;
 use std::{
-    collections::HashSet,
     fmt::Display,
     ops::{Add, Sub},
 };
 
 use crate::astar::Action;
+use rustc_hash::FxHashSet;
 
 /// The definition of the 2D grid space, with free & blocked cells
 #[derive(Debug)]
 pub struct Layout {
-    space: HashSet<Vertex>,
+    space: FxHashSet<Vertex>,
     width: usize,
     height: usize,
 }
@@ -18,8 +18,8 @@ pub struct Layout {
 /// Position of each cell in the layout
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct Vertex {
-    x: i32,
-    y: i32,
+    pub x: i32,
+    pub y: i32,
 }
 
 impl Display for Vertex {

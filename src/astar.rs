@@ -1,10 +1,13 @@
+//! Low level path planning for a single robot
 use std::{
-    collections::{BinaryHeap, HashMap, VecDeque},
-    ops::RangeFrom,
+    collections::{BinaryHeap, VecDeque},
+    iter::Sum,
+    ops::{AddAssign, RangeFrom},
 };
 
 use miette::miette;
 use ordered_float::OrderedFloat;
+use rustc_hash::FxHashMap;
 
 use crate::{
     layout::{Layout, Vertex},
@@ -12,11 +15,11 @@ use crate::{
     route::Route,
 };
 
-/// A priority constraint, which this `astar::solve()` needs to respect
+/// A priority constraint, which this [crate::astar::solve()] needs to respect
 #[derive(Debug, Clone, Default)]
 pub struct RightOfWay {
-    temporary: HashMap<usize, Vertex>,
-    permanent: Option<(RangeFrom<usize>, Vertex)>,
+    temporary: FxHashMap<usize, Vertex>,
+    permanent: Vec<(RangeFrom<usize>, Vertex)>,
 }
 
 impl RightOfWay {
@@ -32,6 +35,22 @@ impl RightOfWay {
     }
 }
 
+impl AddAssign for RightOfWay {
+    fn add_assign(&mut self, other: Self) {
+        self.temporary.extend(other.temporary);
+        self.permanent.extend(other.permanent);
+    }
+}
+
+impl Sum for RightOfWay {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(RightOfWay::default(), |mut acc, other| {
+            acc += other;
+            acc
+        })
+    }
+}
+
 impl From<&Route> for RightOfWay {
     fn from(route: &Route) -> Self {
         Self {
@@ -41,7 +60,12 @@ impl From<&Route> for RightOfWay {
                 .skip(1)
                 .map(|l| (l.time, l.position))
                 .collect(),
-            permanent: route.iter().last().map(|l| (l.time.., l.position)),
+            permanent: route
+                .iter()
+                .rev()
+                .take(1)
+                .map(|l| (l.time.., l.position))
+                .collect(),
         }
     }
 }
@@ -94,7 +118,7 @@ pub fn solve(
     miette::ensure!(!layout.is_blocked(goal), "Goal not free: {goal}");
 
     let mut open = BinaryHeap::new();
-    let mut scores = HashMap::new();
+    let mut scores = FxHashMap::default();
     let s = Location {
         time: 0,
         position: start,

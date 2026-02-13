@@ -110,9 +110,11 @@ pub(crate) fn parse(filename: &str, s: &str) -> Result<Shaman> {
         robots.len()
     );
 
-    shaman
-        .robots
-        .extend(robots.into_iter().map(|((x, y), _, n)| Robot::new(n, x, y)));
+    shaman.robots.extend(
+        robots
+            .into_iter()
+            .map(|((x, y), _, n)| (n, Robot::new(n, x, y))),
+    );
 
     for v in grid
         .iter()
@@ -128,10 +130,9 @@ pub(crate) fn parse(filename: &str, s: &str) -> Result<Shaman> {
                 span,
                 inner: Cell::Goal(n),
             } => {
-                let index = (n as u8) - ('A' as u8);
                 shaman
                     .robots
-                    .get_mut(index as usize)
+                    .get_mut(&n)
                     .ok_or(ParseError::NoRobotForGoal {
                         src: src.clone(),
                         robot: n,

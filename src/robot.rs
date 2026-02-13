@@ -47,6 +47,10 @@ impl Robot {
         }
     }
 
+    pub fn name(&self) -> char {
+        self.name
+    }
+
     pub fn position(&self) -> Vertex {
         self.position
     }
@@ -77,14 +81,14 @@ impl Robot {
         self.position = next.position;
     }
 
-    pub(crate) fn plan(&mut self, layout: &Layout, constraints: &RightOfWay) -> miette::Result<()> {
+    pub(crate) fn plan(&mut self, layout: &Layout, constraint: &RightOfWay) -> miette::Result<()> {
         self.route = crate::astar::solve(
             layout,
             self.position(),
             self.goal
                 .ok_or(miette!("No goal specified"))
                 .wrap_err(format!("Robot '{}'", self.name))?,
-            constraints,
+            constraint,
         )
         .wrap_err(format!("Robot '{}'", self.name))?;
         Ok(())

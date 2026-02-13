@@ -1,8 +1,11 @@
-use std::collections::{HashSet, VecDeque};
+use rustc_hash::FxHashSet;
+use std::collections::VecDeque;
 
-use crate::{layout::Vertex, robot::Location};
+use itertools::Itertools;
 
-#[derive(Debug, Clone, Default)]
+use crate::{Time, layout::Vertex, robot::Location};
+
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Route(VecDeque<Location>);
 
 impl FromIterator<Location> for Route {
@@ -12,27 +15,49 @@ impl FromIterator<Location> for Route {
 }
 
 impl Route {
-    pub fn len(&self) -> usize {
-        self.0.len()
+    pub fn duration(&self) -> Time {
+        self.0.back().map(|l| l.time).unwrap_or_default()
     }
 
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = Location> {
         self.0.iter().copied()
     }
 
+    pub fn conflicts(&self, other: &Self) -> bool {
+        !self.intersection(other).is_empty()
+    }
+
     pub fn intersection(&self, other: &Self) -> Vec<Vertex> {
-        let a = self.0.iter().cloned().collect::<HashSet<_>>();
-        let b = other.0.iter().cloned().collect::<HashSet<_>>();
-        a.intersection(&b)
-            .map(|l| l.position)
-            .chain(
-                self.0
-                    .back()
-                    .zip(other.0.back())
-                    .filter(|(a, b)| a.position == b.position)
-                    .map(|(a, _)| a.position),
-            )
-            .collect()
+        let a = self.0.iter().cloned().collect::<FxHashSet<_>>();
+        let b = other.0.iter().cloned().collect::<FxHashSet<_>>();
+        let mut intersection = a.intersection(&b).map(|l| l.position).collect::<Vec<_>>();
+        intersection.extend(
+            self.0
+                .back()
+                .zip(other.0.back())
+                .filter(|(a, b)| a.position == b.position)
+                .map(|(a, _)| a.position),
+        );
+
+        intersection.extend(
+            self.0
+                .iter()
+                .tuple_windows()
+                .filter(|(now, then)| {
+                    let edge_conflict = other
+                        .0
+                        .iter()
+                        .tuple_windows()
+                        .find(|(a, _)| a.time == now.time)
+                        .is_some_and(|(a, b)| {
+                            b.position == now.position && a.position == then.position
+                        });
+
+                    edge_conflict
+                })
+                .flat_map(|(a, b)| vec![a.position, b.position]),
+        );
+        intersection
     }
 
     pub fn pop(&mut self) -> Option<Location> {

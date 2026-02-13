@@ -1,10 +1,11 @@
 mod astar;
 mod layout;
 mod parser;
+mod pbs;
 mod robot;
 mod route;
 
-use std::{collections::HashSet, fmt::Display, path::Path, time::Duration};
+use std::{fmt::Display, path::Path, time::Duration};
 use termion::{
     color::{Fg, Magenta},
     cursor,
@@ -13,17 +14,19 @@ use termion::{
 
 use crate::{
     layout::{Layout, Vertex},
+    pbs::Pbs,
     robot::Robot,
 };
 use itertools::Itertools;
 use miette::{Result, miette};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 pub type Time = usize;
 
 /// Top level entry point for defining a layout & a list of robots
 #[derive(Debug)]
 struct Shaman {
-    robots: Vec<Robot>,
+    robots: FxHashMap<char, Robot>,
     layout: Layout,
 }
 
@@ -31,7 +34,12 @@ impl Shaman {
     fn parse<P: AsRef<Path>>(file: P) -> Result<Self> {
         let file = file.as_ref().display().to_string();
         let content = std::fs::read_to_string(&file).map_err(|e| miette!("{file}: {e}"))?;
-        parser::parse(&file, &content)
+
+        let mut sim: Shaman = parser::parse(&file, &content)?;
+        for robot in sim.robots.values_mut() {
+            robot.plan(&sim.layout, &Default::default())?;
+        }
+        Ok(sim)
     }
 
     fn new(width: i32, height: i32) -> Self {
@@ -42,9 +50,21 @@ impl Shaman {
     }
 
     pub fn simulate(&mut self) {
-        for robot in &mut self.robots {
+        for robot in self.robots.values_mut() {
             robot.simulate();
         }
+    }
+
+    pub fn solve(self) -> Result<Self> {
+        Pbs::from(self).solve()
+    }
+
+    fn simulation_duration(&self) -> Time {
+        self.robots
+            .values()
+            .map(|r| r.route().duration())
+            .max()
+            .unwrap_or_default()
     }
 }
 
@@ -57,23 +77,23 @@ impl Display for Shaman {
 
         let intersections = self
             .robots
-            .iter()
+            .values()
             .tuple_combinations()
             .flat_map(|(a, b)| a.route().intersection(b.route()))
-            .collect::<HashSet<_>>();
+            .collect::<FxHashSet<_>>();
         writeln!(f, "╮")?;
         for y in 0..self.layout.height() {
             write!(f, "│")?;
             for x in 0..self.layout.width() {
                 let v = Vertex::new(x as i32, y as i32);
-                match self.robots.iter().find(|r| r.position() == v) {
+                match self.robots.values().find(|r| r.position() == v) {
                     Some(robot) => write!(f, "{robot}")?,
                     None => {
                         if intersections.contains(&v) {
                             write!(f, "{}✕{Reset}", Fg(Magenta))?;
                         } else if let Some(robot) = self
                             .robots
-                            .iter()
+                            .values()
                             .find(|r| r.route().iter().any(|n| n.position == v))
                         {
                             write!(f, "{}", robot.pathicon())?;
@@ -98,18 +118,15 @@ impl Display for Shaman {
     }
 }
 
-pub fn level(map: &Path, fps: f32) -> Result<()> {
+pub fn level(map: &Path, fps: f32, stop: bool) -> Result<()> {
     miette::set_hook(Box::new(|_| {
         Box::new(miette::MietteHandlerOpts::new().context_lines(10).build())
     }))?;
 
     let mut sim = Shaman::parse(map)?;
-
-    sim.robots[0].plan(&sim.layout, &Default::default())?;
-    let constraints = sim.robots[0].route().into();
-    sim.robots[1].plan(&sim.layout, &constraints)?;
-    sim.robots[2].plan(&sim.layout, &constraints)?;
-    sim.robots[3].plan(&sim.layout, &constraints)?;
+    if !stop {
+        sim = sim.solve()?;
+    }
 
     if fps == 0. {
         println!("{sim}");
@@ -117,14 +134,8 @@ pub fn level(map: &Path, fps: f32) -> Result<()> {
     }
 
     let dt = Duration::from_secs_f32(1. / fps);
-    let steps = sim
-        .robots
-        .iter()
-        .map(|r| r.route().len())
-        .max()
-        .unwrap_or_default();
     print!("{}", cursor::Hide);
-    for _ in 0..steps {
+    for _ in 0..=sim.simulation_duration() {
         sim.simulate();
         print!(
             "{sim}{}{}",

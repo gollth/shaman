@@ -13,5 +13,6 @@ nom = { version = "8", features = ["std"] }
 nom_locate = "5"
 ordered-float = "5.1.0"
 petgraph = "0.8.3"
+rustc-hash = "2.1.1"
 termion = "4.0.6"
 thiserror = "2.0.18"
