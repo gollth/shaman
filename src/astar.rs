@@ -3,7 +3,7 @@ use std::{
     ops::RangeFrom,
 };
 
-use anyhow::anyhow;
+use eyre::eyre;
 use ordered_float::OrderedFloat;
 
 use crate::{
@@ -87,9 +87,9 @@ pub fn solve(
     start: Vertex,
     goal: Vertex,
     constraint: &RightOfWay,
-) -> anyhow::Result<Route> {
-    anyhow::ensure!(!layout.is_blocked(start), "Start not free: {start}");
-    anyhow::ensure!(!layout.is_blocked(goal), "Goal not free: {goal}");
+) -> eyre::Result<Route> {
+    eyre::ensure!(!layout.is_blocked(start), "Start not free: {start}");
+    eyre::ensure!(!layout.is_blocked(goal), "Goal not free: {goal}");
 
     let mut open = BinaryHeap::new();
     let mut scores = HashMap::new();
@@ -108,7 +108,7 @@ pub fn solve(
     const MAX_ITER: usize = 10000;
     let mut i = 0;
     while let Some(item) = open.pop() {
-        anyhow::ensure!(
+        eyre::ensure!(
             i < MAX_ITER,
             "Failed to find a solution within {MAX_ITER} iterations",
         );
@@ -175,7 +175,7 @@ pub fn solve(
         }
     }
 
-    Err(anyhow!("Failed to find path from {start:?} -> {goal:?}"))
+    Err(eyre!("Failed to find path from {start:?} -> {goal:?}"))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

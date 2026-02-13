@@ -12,7 +12,7 @@ struct Args {
     map: PathBuf,
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() -> eyre::Result<()> {
     let args = Args::parse();
     shaman::level(&args.map, args.fps)?;
     Ok(())

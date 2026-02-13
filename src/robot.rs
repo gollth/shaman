@@ -1,4 +1,4 @@
-use anyhow::{Context, anyhow};
+use eyre::{Context, eyre};
 use std::fmt::Display;
 
 use termion::{
@@ -51,9 +51,9 @@ impl Robot {
         self.position
     }
 
-    pub fn set_goal(&mut self, v: Vertex) -> anyhow::Result<()> {
+    pub fn set_goal(&mut self, v: Vertex) -> eyre::Result<()> {
         if let Some(goal) = self.goal {
-            return Err(anyhow!(
+            return Err(eyre!(
                 "Cannot set goal to {v}, because previously another goal was to {goal}"
             ));
         }
@@ -77,16 +77,16 @@ impl Robot {
         self.position = next.position;
     }
 
-    pub(crate) fn plan(&mut self, layout: &Layout, constraints: &RightOfWay) -> anyhow::Result<()> {
+    pub(crate) fn plan(&mut self, layout: &Layout, constraints: &RightOfWay) -> eyre::Result<()> {
         self.route = crate::astar::solve(
             layout,
             self.position(),
             self.goal
-                .ok_or(anyhow!("No goal specified"))
-                .context(format!("Robot '{}'", self.name))?,
+                .ok_or(eyre!("No goal specified"))
+                .wrap_err(format!("Robot '{}'", self.name))?,
             constraints,
         )
-        .context(format!("Robot '{}'", self.name))?;
+        .wrap_err(format!("Robot '{}'", self.name))?;
         Ok(())
     }
 }

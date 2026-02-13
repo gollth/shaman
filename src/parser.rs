@@ -1,25 +1,33 @@
 use std::str::FromStr;
 
-use anyhow::{Context, anyhow};
 use enum_as_inner::EnumAsInner;
+use eyre::{WrapErr, eyre};
 use itertools::Itertools;
 use nom::{
-    Finish, IResult, Parser,
+    Parser,
     branch::alt,
     bytes::complete::tag,
-    character::{complete::newline, one_of},
+    character::complete::{newline, one_of},
     combinator::eof,
     multi::many_till,
 };
 
 use crate::{Shaman, layout::Vertex, robot::Robot};
 
+pub type Span<'a> = nom_locate::LocatedSpan<&'a str>;
+pub type IResult<'a, O> = nom::IResult<Span<'a>, O>;
+
 impl FromStr for Shaman {
-    type Err = anyhow::Error;
+    type Err = eyre::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         // TODO: Better error messages with expected tokens
-        let (_, grid) = grid(s).finish().map_err(|e| anyhow!("{e}"))?;
+
+        let (_, grid) = grid.parse(Span::new(s)).map_err(|e| match e {
+            nom::Err::Incomplete(needed) => eyre!("{needed:?}"),
+            nom::Err::Error(e) => eyre!("{e}"),
+            nom::Err::Failure(_) => todo!(),
+        })?;
 
         let grid = grid
             .into_iter()
@@ -47,11 +55,11 @@ impl FromStr for Shaman {
             .map(|(_, n)| *n)
             .duplicates()
             .collect::<Vec<_>>();
-        anyhow::ensure!(
+        eyre::ensure!(
             dups.is_empty(),
             "Each robot can only have one start position, but {dups:?} are defined multiple times"
         );
-        anyhow::ensure!(
+        eyre::ensure!(
             robots.len() <= 4,
             "Maximum of 4 robots allowed, but you defined {}",
             robots.len()
@@ -73,10 +81,10 @@ impl FromStr for Shaman {
             match cell {
                 Cell::Goal(c) => {
                     let index = (c as u8) - ('A' as u8);
-                    shaman.robots.get_mut(index as usize).ok_or(anyhow!(
+                    shaman.robots.get_mut(index as usize).ok_or(eyre!(
                         "Cannot create route '{}' because no robot '{c}' was defined in the layout",
                         c.to_ascii_lowercase()
-                    ))?.set_goal(Vertex::new(x,y)).context(format!("Robot {c}"))?;
+                    ))?.set_goal(Vertex::new(x,y)).wrap_err(format!("Robot {c}"))?;
                 }
                 _ => {}
             }
@@ -94,35 +102,35 @@ enum Cell {
     Obstacle,
 }
 
-fn grid(s: &str) -> IResult<&str, Vec<Vec<Cell>>> {
+fn grid(s: Span) -> IResult<Vec<Vec<Cell>>> {
     many_till(row, eof).map(ignore_delim()).parse(s)
 }
 
-fn row(s: &str) -> IResult<&str, Vec<Cell>> {
+fn row(s: Span) -> IResult<Vec<Cell>> {
     many_till(cell, newline).map(ignore_delim()).parse(s)
 }
 
-fn cell(s: &str) -> IResult<&str, Cell> {
+fn cell(s: Span) -> IResult<Cell> {
     alt((free, obstacle, robot, goal)).parse(s)
 }
 
-fn obstacle(s: &str) -> IResult<&str, Cell> {
+fn obstacle(s: Span) -> IResult<Cell> {
     alt((tag("#"), tag("█")))
         .map(always(Cell::Obstacle))
         .parse(s)
 }
 
-fn free(s: &str) -> IResult<&str, Cell> {
+fn free(s: Span) -> IResult<Cell> {
     tag(" ").map(always(Cell::Free)).parse(s)
 }
 
-fn robot(s: &str) -> IResult<&str, Cell> {
+fn robot(s: Span) -> IResult<Cell> {
     one_of("ABCD").map(|c| Cell::Robot(c)).parse(s)
 }
 
-fn goal(s: &str) -> IResult<&str, Cell> {
+fn goal(s: Span) -> IResult<Cell> {
     one_of("abcd")
-        .map(|c| Cell::Goal(c.to_ascii_uppercase()))
+        .map(|c: char| Cell::Goal(c.to_ascii_uppercase()))
         .parse(s)
 }
 

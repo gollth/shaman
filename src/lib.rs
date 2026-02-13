@@ -4,7 +4,7 @@ mod parser;
 mod robot;
 mod route;
 
-use anyhow::Context;
+use eyre::Context;
 use std::{collections::HashSet, fmt::Display, path::Path, time::Duration};
 use termion::{
     color::{Fg, Magenta},
@@ -92,11 +92,11 @@ impl Display for Shaman {
     }
 }
 
-pub fn level(map: &Path, fps: f32) -> anyhow::Result<()> {
+pub fn level(map: &Path, fps: f32) -> eyre::Result<()> {
     let content = std::fs::read_to_string(map).context(map.display().to_string())?;
     let mut sim = content
         .parse::<Shaman>()
-        .context(format!("Invalid map: {}", map.display()))?;
+        .wrap_err(format!("Invalid map: {}", map.display()))?;
 
     sim.robots[0].plan(&sim.layout, &Default::default())?;
     let constraints = sim.robots[0].route().into();
