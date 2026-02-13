@@ -9,6 +9,7 @@ clap = { version = "4.5.57", features = ["derive"] }
 derivative = "2.2.0"
 enum-as-inner = "0.7.0"
 itertools = "0.14.0"
+nom = "8.0.0"
 ordered-float = "5.1.0"
 petgraph = "0.8.3"
 termion = "4.0.6"

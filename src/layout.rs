@@ -1,5 +1,5 @@
 use itertools::Itertools;
-use std::{collections::HashSet, ops::Add};
+use std::{collections::HashSet, fmt::Display, ops::Add};
 
 /// The definition of the 2D grid space, with free & blocked cells
 #[derive(Debug)]
@@ -16,6 +16,11 @@ pub struct Vertex {
     y: i32,
 }
 
+impl Display for Vertex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}/{}", self.x, self.y)
+    }
+}
 impl Vertex {
     pub const fn new(x: i32, y: i32) -> Self {
         Self { x, y }
@@ -57,20 +62,6 @@ impl Layout {
     /// Amount of columns of this layout
     pub(crate) fn width(&self) -> usize {
         self.width
-    }
-
-    /// Add a rectangular obstacle into this layout
-    pub fn obstacle<W, H>(&mut self, width: W, height: H)
-    where
-        W: Iterator<Item = i32> + Clone,
-        H: Iterator<Item = i32> + Clone,
-    {
-        for vertex in width
-            .cartesian_product(height)
-            .map(|(x, y)| Vertex::new(x, y))
-        {
-            self.block(vertex);
-        }
     }
 
     /// Mark a single [Vertex] of this layout as obstacle

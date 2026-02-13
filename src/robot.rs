@@ -1,7 +1,8 @@
+use anyhow::{Context, anyhow};
 use std::fmt::Display;
 
 use termion::{
-    color::{Color, Fg},
+    color::{Fg, Rgb},
     style::Reset,
 };
 
@@ -21,22 +22,43 @@ pub struct Location {
 
 #[derive(Debug, Clone)]
 pub struct Robot {
+    name: char,
     color: String,
     position: Vertex,
     route: Route,
+    goal: Option<Vertex>,
 }
 
 impl Robot {
-    pub fn new<C: Color>(x: i32, y: i32, color: C) -> Self {
+    pub fn new(name: char, x: i32, y: i32) -> Self {
+        let color = match name {
+            'A' => Rgb(0, 0, 255),
+            'B' => Rgb(255, 0, 0),
+            'C' => Rgb(0, 255, 0),
+            'D' => Rgb(255, 255, 0),
+            _ => panic!(),
+        };
         Self {
+            name,
             color: format!("{}", Fg(color)),
             position: Vertex::new(x, y),
             route: Default::default(),
+            goal: None,
         }
     }
 
     pub fn position(&self) -> Vertex {
         self.position
+    }
+
+    pub fn set_goal(&mut self, v: Vertex) -> anyhow::Result<()> {
+        if let Some(goal) = self.goal {
+            return Err(anyhow!(
+                "Cannot set goal to {v}, because previously another goal was to {goal}"
+            ));
+        }
+        self.goal = Some(v);
+        Ok(())
     }
 
     pub fn route(&self) -> &Route {
@@ -55,13 +77,16 @@ impl Robot {
         self.position = next.position;
     }
 
-    pub(crate) fn plan(
-        &mut self,
-        layout: &Layout,
-        goal: Vertex,
-        constraints: &RightOfWay,
-    ) -> anyhow::Result<()> {
-        self.route = crate::astar::solve(layout, self.position(), goal, constraints)?;
+    pub(crate) fn plan(&mut self, layout: &Layout, constraints: &RightOfWay) -> anyhow::Result<()> {
+        self.route = crate::astar::solve(
+            layout,
+            self.position(),
+            self.goal
+                .ok_or(anyhow!("No goal specified"))
+                .context(format!("Robot '{}'", self.name))?,
+            constraints,
+        )
+        .context(format!("Robot '{}'", self.name))?;
         Ok(())
     }
 }

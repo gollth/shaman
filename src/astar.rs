@@ -88,8 +88,8 @@ pub fn solve(
     goal: Vertex,
     constraint: &RightOfWay,
 ) -> anyhow::Result<Route> {
-    anyhow::ensure!(!layout.is_blocked(start), "Start not free: {start:?}");
-    anyhow::ensure!(!layout.is_blocked(goal), "Goal not free: {goal:?}");
+    anyhow::ensure!(!layout.is_blocked(start), "Start not free: {start}");
+    anyhow::ensure!(!layout.is_blocked(goal), "Goal not free: {goal}");
 
     let mut open = BinaryHeap::new();
     let mut scores = HashMap::new();

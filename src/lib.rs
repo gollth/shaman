@@ -1,9 +1,11 @@
 mod astar;
 mod layout;
+mod parser;
 mod robot;
 mod route;
 
-use std::{collections::HashSet, fmt::Display, time::Duration};
+use anyhow::Context;
+use std::{collections::HashSet, fmt::Display, path::Path, time::Duration};
 use termion::{
     color::{Fg, Magenta},
     cursor,
@@ -15,17 +17,24 @@ use crate::{
     robot::Robot,
 };
 use itertools::Itertools;
-use termion::color::*;
 
 pub type Time = usize;
 
 /// Top level entry point for defining a layout & a list of robots
+#[derive(Debug)]
 struct Shaman {
     robots: Vec<Robot>,
     layout: Layout,
 }
 
 impl Shaman {
+    fn new(width: i32, height: i32) -> Self {
+        Self {
+            robots: Default::default(),
+            layout: Layout::empty(width as usize, height as usize),
+        }
+    }
+
     pub fn simulate(&mut self) {
         for robot in &mut self.robots {
             robot.simulate();
@@ -83,27 +92,17 @@ impl Display for Shaman {
     }
 }
 
-pub fn level(fps: f32) -> anyhow::Result<()> {
-    let mut sim = Shaman {
-        layout: Layout::empty(20, 10),
-        robots: vec![
-            Robot::new(5, 0, Blue),
-            Robot::new(8, 3, Red),
-            Robot::new(19, 8, Green),
-            Robot::new(0, 9, Yellow),
-        ],
-    };
+pub fn level(map: &Path, fps: f32) -> anyhow::Result<()> {
+    let content = std::fs::read_to_string(map).context(map.display().to_string())?;
+    let mut sim = content
+        .parse::<Shaman>()
+        .context(format!("Invalid map: {}", map.display()))?;
 
-    // walls
-    sim.layout.obstacle(0..=12, 4..=5);
-    sim.layout.obstacle(10..=11, 1..=5);
-    sim.layout.obstacle(14..=19, 4..=5);
-
-    sim.robots[0].plan(&sim.layout, Vertex::new(6, 9), &Default::default())?;
+    sim.robots[0].plan(&sim.layout, &Default::default())?;
     let constraints = sim.robots[0].route().into();
-    sim.robots[1].plan(&sim.layout, Vertex::new(19, 3), &constraints)?;
-    sim.robots[2].plan(&sim.layout, Vertex::new(5, 0), &constraints)?;
-    sim.robots[3].plan(&sim.layout, Vertex::new(6, 9), &constraints)?;
+    sim.robots[1].plan(&sim.layout, &constraints)?;
+    sim.robots[2].plan(&sim.layout, &constraints)?;
+    sim.robots[3].plan(&sim.layout, &constraints)?;
 
     if fps == 0. {
         println!("{sim}");
