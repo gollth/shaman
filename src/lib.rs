@@ -25,13 +25,13 @@ pub type Time = usize;
 
 /// Top level entry point for defining a layout & a list of robots
 #[derive(Debug)]
-struct Shaman {
+pub struct Shaman {
     robots: FxHashMap<char, Robot>,
     layout: Layout,
 }
 
 impl Shaman {
-    fn parse<P: AsRef<Path>>(file: P) -> Result<Self> {
+    pub fn parse<P: AsRef<Path>>(file: P) -> Result<Self> {
         let file = file.as_ref().display().to_string();
         let content = std::fs::read_to_string(&file).map_err(|e| miette!("{file}: {e}"))?;
 
