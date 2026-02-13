@@ -1,4 +1,4 @@
-use miette::{WrapErr, miette};
+use miette::{SourceSpan, WrapErr, miette};
 use std::fmt::Display;
 
 use termion::{
@@ -10,6 +10,7 @@ use crate::{
     Time,
     astar::RightOfWay,
     layout::{Layout, Vertex},
+    parser::ParseError,
     route::Route,
 };
 
@@ -24,13 +25,13 @@ pub struct Location {
 pub struct Robot {
     name: char,
     color: String,
-    position: Vertex,
+    position: (Vertex, SourceSpan),
     route: Route,
-    goal: Option<Vertex>,
+    goal: Option<(Vertex, SourceSpan)>,
 }
 
 impl Robot {
-    pub fn new(name: char, x: i32, y: i32) -> Self {
+    pub fn new(name: char, x: i32, y: i32, span: SourceSpan) -> Self {
         let color = match name {
             'A' => Rgb(0, 0, 255),
             'B' => Rgb(255, 0, 0),
@@ -41,7 +42,7 @@ impl Robot {
         Self {
             name,
             color: format!("{}", Fg(color)),
-            position: Vertex::new(x, y),
+            position: (Vertex::new(x, y), span),
             route: Default::default(),
             goal: None,
         }
@@ -51,17 +52,20 @@ impl Robot {
         self.name
     }
 
-    pub fn position(&self) -> Vertex {
+    pub fn position(&self) -> (Vertex, SourceSpan) {
         self.position
     }
 
-    pub fn set_goal(&mut self, v: Vertex) -> miette::Result<()> {
-        if let Some(goal) = self.goal {
-            return Err(miette!(
-                "Cannot set goal to {v}, because previously another goal was to {goal}"
-            ));
+    pub fn set_goal(&mut self, layout: &Layout, v: Vertex, span: SourceSpan) -> miette::Result<()> {
+        if let Some((_, s)) = self.goal {
+            return Err(ParseError::DuplicateGoals {
+                src: layout.code(),
+                a: span,
+                b: s,
+            }
+            .into());
         }
-        self.goal = Some(v);
+        self.goal = Some((v, span));
         Ok(())
     }
 
@@ -78,7 +82,7 @@ impl Robot {
             return;
         };
 
-        self.position = next.position;
+        self.position.0 = next.position;
     }
 
     pub(crate) fn plan(&mut self, layout: &Layout, constraint: &RightOfWay) -> miette::Result<()> {

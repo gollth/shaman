@@ -11,5 +11,5 @@ fn regression(#[files("maps/*.txt")] file: PathBuf) {
 fn impossible(#[files("maps/impossible/*.txt")] file: PathBuf) {
     let e = Shaman::parse(file).unwrap_err();
     let msg = format!("{e:#}");
-    assert!(msg.contains("Failed to find a solution"), "{msg}");
+    assert!(msg.contains("No route found"), "{msg}");
 }

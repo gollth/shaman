@@ -5,12 +5,13 @@ use std::{
     ops::{AddAssign, RangeFrom},
 };
 
-use miette::miette;
+use miette::SourceSpan;
 use ordered_float::OrderedFloat;
 use rustc_hash::FxHashMap;
 
 use crate::{
     layout::{Layout, Vertex},
+    parser::ParseError,
     robot::Location,
     route::Route,
 };
@@ -110,18 +111,18 @@ impl Action {
 /// or rerouting
 pub fn solve(
     layout: &Layout,
-    start: Vertex,
-    goal: Vertex,
+    start: (Vertex, SourceSpan),
+    goal: (Vertex, SourceSpan),
     constraint: &RightOfWay,
 ) -> miette::Result<Route> {
-    miette::ensure!(!layout.is_blocked(start), "Start not free: {start}");
-    miette::ensure!(!layout.is_blocked(goal), "Goal not free: {goal}");
+    miette::ensure!(!layout.is_blocked(start.0), "Start not free: {}", start.0);
+    miette::ensure!(!layout.is_blocked(goal.0), "Goal not free: {}", goal.0);
 
     let mut open = BinaryHeap::new();
     let mut scores = FxHashMap::default();
     let s = Location {
         time: 0,
-        position: start,
+        position: start.0,
     };
     scores.insert(s, 0.0);
     open.push(Item {
@@ -134,12 +135,11 @@ pub fn solve(
     const MAX_ITER: usize = 10000;
     let mut i = 0;
     while let Some(item) = open.pop() {
-        miette::ensure!(
-            i < MAX_ITER,
-            "Failed to find a solution within {MAX_ITER} iterations",
-        );
+        if i >= MAX_ITER {
+            break;
+        }
         i += 1;
-        if item.location.position == goal {
+        if item.location.position == goal.0 {
             // Reached goal
             let mut current = Box::new(item);
             let mut route = VecDeque::new();
@@ -194,8 +194,7 @@ pub fn solve(
             if scores.get(&candidate).is_none_or(|g| tentative_g < *g) {
                 scores.insert(candidate, tentative_g);
                 // valid candidate
-                let h = candidate.position.distance_squared(goal);
-                // println!("  + {action:?} => {tentative_g} + {h}");
+                let h = candidate.position.distance_squared(goal.0);
                 let item = Item {
                     cost: OrderedFloat(tentative_g + h),
                     location: candidate,
@@ -206,7 +205,12 @@ pub fn solve(
         }
     }
 
-    Err(miette!("Failed to find path from {start:?} -> {goal:?}"))
+    Err(ParseError::RouteNotFound {
+        src: layout.code(),
+        start: start.1,
+        goal: goal.1,
+    }
+    .into())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

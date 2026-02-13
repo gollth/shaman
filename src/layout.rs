@@ -1,4 +1,5 @@
 use itertools::Itertools;
+use miette::NamedSource;
 use std::{
     fmt::Display,
     ops::{Add, Sub},
@@ -10,6 +11,7 @@ use rustc_hash::FxHashSet;
 /// The definition of the 2D grid space, with free & blocked cells
 #[derive(Debug)]
 pub struct Layout {
+    code: NamedSource<String>,
     space: FxHashSet<Vertex>,
     width: usize,
     height: usize,
@@ -62,8 +64,9 @@ impl Sub for Vertex {
 }
 
 impl Layout {
-    pub fn empty(width: usize, height: usize) -> Self {
+    pub fn empty(code: NamedSource<String>, width: usize, height: usize) -> Self {
         Self {
+            code,
             space: (0..width)
                 .cartesian_product(0..height)
                 .map(|(x, y)| Vertex::new(x as i32, y as i32))
@@ -71,6 +74,10 @@ impl Layout {
             width,
             height,
         }
+    }
+
+    pub fn code(&self) -> NamedSource<String> {
+        self.code.clone()
     }
 
     /// Amount of rows of this layout

@@ -18,7 +18,7 @@ use crate::{
     robot::Robot,
 };
 use itertools::Itertools;
-use miette::{Result, miette};
+use miette::{NamedSource, Result, miette};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 pub type Time = usize;
@@ -42,10 +42,10 @@ impl Shaman {
         Ok(sim)
     }
 
-    fn new(width: i32, height: i32) -> Self {
+    fn new(code: NamedSource<String>, width: i32, height: i32) -> Self {
         Self {
             robots: Default::default(),
-            layout: Layout::empty(width as usize, height as usize),
+            layout: Layout::empty(code, width as usize, height as usize),
         }
     }
 
@@ -86,7 +86,7 @@ impl Display for Shaman {
             write!(f, "│")?;
             for x in 0..self.layout.width() {
                 let v = Vertex::new(x as i32, y as i32);
-                match self.robots.values().find(|r| r.position() == v) {
+                match self.robots.values().find(|r| r.position().0 == v) {
                     Some(robot) => write!(f, "{robot}")?,
                     None => {
                         if intersections.contains(&v) {

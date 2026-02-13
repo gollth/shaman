@@ -18,6 +18,7 @@ use crate::{Shaman, layout::Vertex, robot::Robot};
 type Span<'a> = LocatedSpan<&'a str>;
 type IResult<'a, T> = nom::IResult<Span<'a>, T>;
 
+// TODO: Move to `lib`
 #[derive(Error, Debug, Diagnostic)]
 pub enum ParseError {
     #[error(
@@ -40,12 +41,32 @@ pub enum ParseError {
         b: SourceSpan,
     },
 
+    #[error("Only one goal per robot")]
+    DuplicateGoals {
+        #[source_code]
+        src: NamedSource<String>,
+        #[label("first")]
+        a: SourceSpan,
+        #[label("second")]
+        b: SourceSpan,
+    },
+
     #[error("No robot named '{robot}' defined")]
     NoRobotForGoal {
         #[source_code]
         src: NamedSource<String>,
         robot: char,
         #[label("for this goal")]
+        goal: SourceSpan,
+    },
+
+    #[error("No route found")]
+    RouteNotFound {
+        #[source_code]
+        src: NamedSource<String>,
+        #[label("from here")]
+        start: SourceSpan,
+        #[label("to here")]
         goal: SourceSpan,
     },
 }
@@ -74,6 +95,7 @@ pub(crate) fn parse(filename: &str, s: &str) -> Result<Shaman> {
         .collect::<Vec<_>>();
 
     let mut shaman = Shaman::new(
+        src.clone(),
         grid.iter().map(|((x, _), _)| *x).max().unwrap_or_default() + 1,
         grid.iter().map(|((_, y), _)| *y).max().unwrap_or_default() + 1,
     );
@@ -113,7 +135,7 @@ pub(crate) fn parse(filename: &str, s: &str) -> Result<Shaman> {
     shaman.robots.extend(
         robots
             .into_iter()
-            .map(|((x, y), _, n)| (n, Robot::new(n, x, y))),
+            .map(|((x, y), s, n)| (n, Robot::new(n, x, y, (s.location_offset(), 1).into()))),
     );
 
     for v in grid
@@ -138,7 +160,11 @@ pub(crate) fn parse(filename: &str, s: &str) -> Result<Shaman> {
                         robot: n,
                         goal: (span.location_offset(), 1).into(),
                     })?
-                    .set_goal(Vertex::new(x, y))
+                    .set_goal(
+                        &shaman.layout,
+                        Vertex::new(x, y),
+                        (span.location_offset(), 1).into(),
+                    )
                     .wrap_err(format!("Robot {n}"))?;
             }
             _ => {}
