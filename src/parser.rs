@@ -1,97 +1,155 @@
-use std::str::FromStr;
+#![allow(unused)] // false positive for ParseError struct
 
 use enum_as_inner::EnumAsInner;
-use eyre::{WrapErr, eyre};
 use itertools::Itertools;
+use miette::{Diagnostic, NamedSource, Result, SourceSpan, WrapErr, ensure, miette};
 use nom::{
     Parser,
     branch::alt,
-    bytes::complete::tag,
-    character::complete::{newline, one_of},
+    character::complete::{char, newline},
     combinator::eof,
     multi::many_till,
 };
+use nom_locate::{LocatedSpan, position};
+use thiserror::Error;
 
 use crate::{Shaman, layout::Vertex, robot::Robot};
 
-pub type Span<'a> = nom_locate::LocatedSpan<&'a str>;
-pub type IResult<'a, O> = nom::IResult<Span<'a>, O>;
+type Span<'a> = LocatedSpan<&'a str>;
+type IResult<'a, T> = nom::IResult<Span<'a>, T>;
 
-impl FromStr for Shaman {
-    type Err = eyre::Error;
+#[derive(Error, Debug, Diagnostic)]
+pub enum ParseError {
+    #[error(
+        "Expected either an obstacle (# or █), a free cell (space), a robot (A..D) or a goal (a..d)"
+    )]
+    InvalidCell {
+        #[source_code]
+        src: NamedSource<String>,
+        #[label("here")]
+        highlight: SourceSpan,
+    },
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // TODO: Better error messages with expected tokens
+    #[error("Robot names must be unique")]
+    DuplicateRobots {
+        #[source_code]
+        src: NamedSource<String>,
+        #[label("first")]
+        a: SourceSpan,
+        #[label("second")]
+        b: SourceSpan,
+    },
 
-        let (_, grid) = grid.parse(Span::new(s)).map_err(|e| match e {
-            nom::Err::Incomplete(needed) => eyre!("{needed:?}"),
-            nom::Err::Error(e) => eyre!("{e}"),
-            nom::Err::Failure(_) => todo!(),
-        })?;
+    #[error("No robot named '{robot}' defined")]
+    NoRobotForGoal {
+        #[source_code]
+        src: NamedSource<String>,
+        robot: char,
+        #[label("for this goal")]
+        goal: SourceSpan,
+    },
+}
 
-        let grid = grid
-            .into_iter()
-            .enumerate()
-            .flat_map(|(y, row)| {
-                row.into_iter()
-                    .enumerate()
-                    .map(move |(x, c)| ((x as i32, y as i32), c))
-            })
-            .collect::<Vec<_>>();
+pub(crate) fn parse(filename: &str, s: &str) -> Result<Shaman> {
+    let src = NamedSource::new(filename, s.to_string());
 
-        let mut shaman = Shaman::new(
-            grid.iter().map(|((x, _), _)| *x).max().unwrap_or_default() + 1,
-            grid.iter().map(|((_, y), _)| *y).max().unwrap_or_default() + 1,
-        );
-
-        let robots = grid
-            .iter()
-            .filter_map(|(c, cell)| Some((*c, cell.into_robot().ok()?)))
-            .sorted_by_key(|(_, n)| *n)
-            .collect::<Vec<_>>();
-
-        let dups = robots
-            .iter()
-            .map(|(_, n)| *n)
-            .duplicates()
-            .collect::<Vec<_>>();
-        eyre::ensure!(
-            dups.is_empty(),
-            "Each robot can only have one start position, but {dups:?} are defined multiple times"
-        );
-        eyre::ensure!(
-            robots.len() <= 4,
-            "Maximum of 4 robots allowed, but you defined {}",
-            robots.len()
-        );
-
-        shaman
-            .robots
-            .extend(robots.into_iter().map(|((x, y), n)| Robot::new(n, x, y)));
-
-        for v in grid
-            .iter()
-            .filter(|(_, cell)| cell.is_obstacle())
-            .map(|((x, y), _)| Vertex::new(*x, *y))
-        {
-            shaman.layout.block(v);
+    let (_, grid) = grid.parse(Span::new(s)).map_err(|e| match e {
+        nom::Err::Incomplete(more) => miette!("Failed to parse map, expected more input: {more:?}"),
+        nom::Err::Error(e) => ParseError::InvalidCell {
+            src: src.clone(),
+            highlight: (e.input.location_offset(), 1).into(),
         }
+        .into(),
+        nom::Err::Failure(e) => miette!("Failed to parse map: {e}"),
+    })?;
 
-        for ((x, y), cell) in grid {
-            match cell {
-                Cell::Goal(c) => {
-                    let index = (c as u8) - ('A' as u8);
-                    shaman.robots.get_mut(index as usize).ok_or(eyre!(
-                        "Cannot create route '{}' because no robot '{c}' was defined in the layout",
-                        c.to_ascii_lowercase()
-                    ))?.set_goal(Vertex::new(x,y)).wrap_err(format!("Robot {c}"))?;
-                }
-                _ => {}
-            }
+    let grid = grid
+        .into_iter()
+        .enumerate()
+        .flat_map(|(y, row)| {
+            row.into_iter()
+                .enumerate()
+                .map(move |(x, c)| ((x as i32, y as i32), c))
+        })
+        .collect::<Vec<_>>();
+
+    let mut shaman = Shaman::new(
+        grid.iter().map(|((x, _), _)| *x).max().unwrap_or_default() + 1,
+        grid.iter().map(|((_, y), _)| *y).max().unwrap_or_default() + 1,
+    );
+
+    let robots = grid
+        .iter()
+        .filter_map(|(c, cell)| Some((*c, cell.span, cell.inner.into_robot().ok()?)))
+        .sorted_by_key(|(_, _, n)| *n)
+        .collect::<Vec<_>>();
+
+    let dups = robots
+        .iter()
+        .cloned()
+        .map(|(_, span, n)| (n, span))
+        .into_group_map();
+
+    if let Some((b, a)) = dups
+        .into_iter()
+        .sorted_by_key(|(n, _)| *n)
+        .filter_map(|(_, mut ds)| Some((ds.pop()?, ds.pop()?)))
+        .next()
+    {
+        return Err(ParseError::DuplicateRobots {
+            src: src.clone(),
+            a: (a.location_offset(), 1).into(),
+            b: (b.location_offset(), 1).into(),
         }
-
-        Ok(shaman)
+        .into());
     }
+
+    ensure!(
+        robots.len() <= 4,
+        "Maximum of 4 robots allowed, but you defined {}",
+        robots.len()
+    );
+
+    shaman
+        .robots
+        .extend(robots.into_iter().map(|((x, y), _, n)| Robot::new(n, x, y)));
+
+    for v in grid
+        .iter()
+        .filter(|(_, cell)| cell.inner.is_obstacle())
+        .map(|((x, y), _)| Vertex::new(*x, *y))
+    {
+        shaman.layout.block(v);
+    }
+
+    for ((x, y), cell) in grid {
+        match cell {
+            Spanned {
+                span,
+                inner: Cell::Goal(n),
+            } => {
+                let index = (n as u8) - ('A' as u8);
+                shaman
+                    .robots
+                    .get_mut(index as usize)
+                    .ok_or(ParseError::NoRobotForGoal {
+                        src: src.clone(),
+                        robot: n,
+                        goal: (span.location_offset(), 1).into(),
+                    })?
+                    .set_goal(Vertex::new(x, y))
+                    .wrap_err(format!("Robot {n}"))?;
+            }
+            _ => {}
+        }
+    }
+
+    Ok(shaman)
+}
+
+struct Spanned<'a, T> {
+    span: Span<'a>,
+    inner: T,
 }
 
 #[derive(Debug, Clone, Copy, EnumAsInner)]
@@ -102,36 +160,30 @@ enum Cell {
     Obstacle,
 }
 
-fn grid(s: Span) -> IResult<Vec<Vec<Cell>>> {
-    many_till(row, eof).map(ignore_delim()).parse(s)
-}
-
-fn row(s: Span) -> IResult<Vec<Cell>> {
-    many_till(cell, newline).map(ignore_delim()).parse(s)
-}
-
-fn cell(s: Span) -> IResult<Cell> {
-    alt((free, obstacle, robot, goal)).parse(s)
-}
-
-fn obstacle(s: Span) -> IResult<Cell> {
-    alt((tag("#"), tag("█")))
-        .map(always(Cell::Obstacle))
+fn grid(s: Span) -> IResult<Vec<Vec<Spanned<Cell>>>> {
+    many_till(many_till(cell, newline).map(ignore_delim()), eof)
+        .map(ignore_delim())
         .parse(s)
 }
 
-fn free(s: Span) -> IResult<Cell> {
-    tag(" ").map(always(Cell::Free)).parse(s)
-}
-
-fn robot(s: Span) -> IResult<Cell> {
-    one_of("ABCD").map(|c| Cell::Robot(c)).parse(s)
-}
-
-fn goal(s: Span) -> IResult<Cell> {
-    one_of("abcd")
-        .map(|c: char| Cell::Goal(c.to_ascii_uppercase()))
-        .parse(s)
+fn cell(s: Span) -> IResult<Spanned<Cell>> {
+    let (s, span) = position(s)?;
+    let (s, cell) = alt((
+        char(' ').map(always(Cell::Free)),
+        char('#').or(char('█')).map(always(Cell::Obstacle)),
+        char('A')
+            .or(char('B'))
+            .or(char('C'))
+            .or(char('D'))
+            .map(|c| Cell::Robot(c)),
+        char('a')
+            .or(char('b'))
+            .or(char('c'))
+            .or(char('d'))
+            .map(|c: char| Cell::Goal(c.to_ascii_uppercase())),
+    ))
+    .parse(s)?;
+    Ok((s, Spanned { span, inner: cell }))
 }
 
 pub fn always<A: Copy, B>(x: A) -> impl Fn(B) -> A {

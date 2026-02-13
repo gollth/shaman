@@ -4,7 +4,6 @@ mod parser;
 mod robot;
 mod route;
 
-use eyre::Context;
 use std::{collections::HashSet, fmt::Display, path::Path, time::Duration};
 use termion::{
     color::{Fg, Magenta},
@@ -17,6 +16,7 @@ use crate::{
     robot::Robot,
 };
 use itertools::Itertools;
+use miette::{Result, miette};
 
 pub type Time = usize;
 
@@ -28,6 +28,12 @@ struct Shaman {
 }
 
 impl Shaman {
+    fn parse<P: AsRef<Path>>(file: P) -> Result<Self> {
+        let file = file.as_ref().display().to_string();
+        let content = std::fs::read_to_string(&file).map_err(|e| miette!("{file}: {e}"))?;
+        parser::parse(&file, &content)
+    }
+
     fn new(width: i32, height: i32) -> Self {
         Self {
             robots: Default::default(),
@@ -92,11 +98,12 @@ impl Display for Shaman {
     }
 }
 
-pub fn level(map: &Path, fps: f32) -> eyre::Result<()> {
-    let content = std::fs::read_to_string(map).context(map.display().to_string())?;
-    let mut sim = content
-        .parse::<Shaman>()
-        .wrap_err(format!("Invalid map: {}", map.display()))?;
+pub fn level(map: &Path, fps: f32) -> Result<()> {
+    miette::set_hook(Box::new(|_| {
+        Box::new(miette::MietteHandlerOpts::new().context_lines(10).build())
+    }))?;
+
+    let mut sim = Shaman::parse(map)?;
 
     sim.robots[0].plan(&sim.layout, &Default::default())?;
     let constraints = sim.robots[0].route().into();

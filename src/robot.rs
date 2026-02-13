@@ -1,4 +1,4 @@
-use eyre::{Context, eyre};
+use miette::{WrapErr, miette};
 use std::fmt::Display;
 
 use termion::{
@@ -51,9 +51,9 @@ impl Robot {
         self.position
     }
 
-    pub fn set_goal(&mut self, v: Vertex) -> eyre::Result<()> {
+    pub fn set_goal(&mut self, v: Vertex) -> miette::Result<()> {
         if let Some(goal) = self.goal {
-            return Err(eyre!(
+            return Err(miette!(
                 "Cannot set goal to {v}, because previously another goal was to {goal}"
             ));
         }
@@ -77,12 +77,12 @@ impl Robot {
         self.position = next.position;
     }
 
-    pub(crate) fn plan(&mut self, layout: &Layout, constraints: &RightOfWay) -> eyre::Result<()> {
+    pub(crate) fn plan(&mut self, layout: &Layout, constraints: &RightOfWay) -> miette::Result<()> {
         self.route = crate::astar::solve(
             layout,
             self.position(),
             self.goal
-                .ok_or(eyre!("No goal specified"))
+                .ok_or(miette!("No goal specified"))
                 .wrap_err(format!("Robot '{}'", self.name))?,
             constraints,
         )

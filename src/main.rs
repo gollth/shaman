@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
+use miette::Result;
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -12,7 +13,7 @@ struct Args {
     map: PathBuf,
 }
 
-fn main() -> eyre::Result<()> {
+fn main() -> Result<()> {
     let args = Args::parse();
     shaman::level(&args.map, args.fps)?;
     Ok(())
