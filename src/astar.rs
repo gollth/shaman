@@ -98,8 +98,8 @@ impl Action {
     fn cost(&self, previous: Self) -> f32 {
         match (self, previous) {
             (Self::WAIT, _) => 1.,
-            (a, b) if *a == b => 2.,
-            _ => 5.,
+            (a, b) if *a == b => 1.,
+            _ => 2.,
         }
     }
 }

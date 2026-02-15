@@ -1,4 +1,4 @@
-use miette::{SourceSpan, WrapErr, miette};
+use miette::{SourceSpan, WrapErr};
 use std::fmt::Display;
 
 use termion::{
@@ -86,15 +86,10 @@ impl Robot {
     }
 
     pub(crate) fn plan(&mut self, layout: &Layout, constraint: &RightOfWay) -> miette::Result<()> {
-        self.route = crate::astar::solve(
-            layout,
-            self.position(),
-            self.goal
-                .ok_or(miette!("No goal specified"))
-                .wrap_err(format!("Robot '{}'", self.name))?,
-            constraint,
-        )
-        .wrap_err(format!("Robot '{}'", self.name))?;
+        if let Some(goal) = self.goal {
+            self.route = crate::astar::solve(layout, self.position(), goal, constraint)
+                .wrap_err(format!("Robot '{}'", self.name))?;
+        }
         Ok(())
     }
 }
