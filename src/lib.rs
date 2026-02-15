@@ -1,4 +1,5 @@
 mod astar;
+mod error;
 mod layout;
 mod parser;
 mod pbs;

@@ -1,4 +1,4 @@
-use miette::{SourceSpan, WrapErr};
+use miette::SourceSpan;
 use std::fmt::Display;
 
 use termion::{
@@ -9,8 +9,8 @@ use termion::{
 use crate::{
     Time,
     astar::RightOfWay,
+    error::ShamanError,
     layout::{Layout, Vertex},
-    parser::ParseError,
     route::Route,
 };
 
@@ -56,14 +56,18 @@ impl Robot {
         self.position
     }
 
-    pub fn set_goal(&mut self, layout: &Layout, v: Vertex, span: SourceSpan) -> miette::Result<()> {
+    pub fn set_goal(
+        &mut self,
+        layout: &Layout,
+        v: Vertex,
+        span: SourceSpan,
+    ) -> Result<(), ShamanError> {
         if let Some((_, s)) = self.goal {
-            return Err(ParseError::DuplicateGoals {
+            return Err(ShamanError::DuplicateGoals {
                 src: layout.code(),
                 a: span,
                 b: s,
-            }
-            .into());
+            });
         }
         self.goal = Some((v, span));
         Ok(())
@@ -85,10 +89,13 @@ impl Robot {
         self.position.0 = next.position;
     }
 
-    pub(crate) fn plan(&mut self, layout: &Layout, constraint: &RightOfWay) -> miette::Result<()> {
+    pub(crate) fn plan(
+        &mut self,
+        layout: &Layout,
+        constraint: &RightOfWay,
+    ) -> Result<(), ShamanError> {
         if let Some(goal) = self.goal {
-            self.route = crate::astar::solve(layout, self.position(), goal, constraint)
-                .wrap_err(format!("Robot '{}'", self.name))?;
+            self.route = crate::astar::solve(layout, self.position(), goal, constraint)?;
         }
         Ok(())
     }

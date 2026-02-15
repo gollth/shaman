@@ -1,8 +1,6 @@
-#![allow(unused)] // false positive for ParseError struct
-
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
-use miette::{Diagnostic, NamedSource, Result, SourceSpan, WrapErr, ensure, miette};
+use miette::{NamedSource, Result};
 use nom::{
     Parser,
     branch::alt,
@@ -11,77 +9,23 @@ use nom::{
     multi::many_till,
 };
 use nom_locate::{LocatedSpan, position};
-use thiserror::Error;
 
-use crate::{Shaman, layout::Vertex, robot::Robot};
+use crate::{Shaman, error::ShamanError, layout::Vertex, robot::Robot};
 
 type Span<'a> = LocatedSpan<&'a str>;
 type IResult<'a, T> = nom::IResult<Span<'a>, T>;
 
-// TODO: Move to `lib`
-#[derive(Error, Debug, Diagnostic)]
-pub enum ParseError {
-    #[error(
-        "Expected either an obstacle (# or █), a free cell (space), a robot (A..D) or a goal (a..d)"
-    )]
-    InvalidCell {
-        #[source_code]
-        src: NamedSource<String>,
-        #[label("here")]
-        highlight: SourceSpan,
-    },
-
-    #[error("Robot names must be unique")]
-    DuplicateRobots {
-        #[source_code]
-        src: NamedSource<String>,
-        #[label("first")]
-        a: SourceSpan,
-        #[label("second")]
-        b: SourceSpan,
-    },
-
-    #[error("Only one goal per robot")]
-    DuplicateGoals {
-        #[source_code]
-        src: NamedSource<String>,
-        #[label("first")]
-        a: SourceSpan,
-        #[label("second")]
-        b: SourceSpan,
-    },
-
-    #[error("No robot named '{robot}' defined")]
-    NoRobotForGoal {
-        #[source_code]
-        src: NamedSource<String>,
-        robot: char,
-        #[label("for this goal")]
-        goal: SourceSpan,
-    },
-
-    #[error("No route found")]
-    RouteNotFound {
-        #[source_code]
-        src: NamedSource<String>,
-        #[label("from here")]
-        start: SourceSpan,
-        #[label("to here")]
-        goal: SourceSpan,
-    },
-}
-
-pub(crate) fn parse(filename: &str, s: &str) -> Result<Shaman> {
+pub(crate) fn parse(filename: &str, s: &str) -> Result<Shaman, ShamanError> {
     let src = NamedSource::new(filename, s.to_string());
 
     let (_, grid) = grid.parse(Span::new(s)).map_err(|e| match e {
-        nom::Err::Incomplete(more) => miette!("Failed to parse map, expected more input: {more:?}"),
-        nom::Err::Error(e) => ParseError::InvalidCell {
+        nom::Err::Incomplete(more) => panic!("Failed to parse map, expected more input: {more:?}"),
+        nom::Err::Error(e) => ShamanError::InvalidCell {
             src: src.clone(),
             highlight: (e.input.location_offset(), 1).into(),
         }
         .into(),
-        nom::Err::Failure(e) => miette!("Failed to parse map: {e}"),
+        nom::Err::Failure(e) => panic!("Failed to parse map: {e}"),
     })?;
 
     let grid = grid
@@ -118,19 +62,13 @@ pub(crate) fn parse(filename: &str, s: &str) -> Result<Shaman> {
         .filter_map(|(_, mut ds)| Some((ds.pop()?, ds.pop()?)))
         .next()
     {
-        return Err(ParseError::DuplicateRobots {
+        return Err(ShamanError::DuplicateRobots {
             src: src.clone(),
             a: (a.location_offset(), 1).into(),
             b: (b.location_offset(), 1).into(),
         }
         .into());
     }
-
-    ensure!(
-        robots.len() <= 4,
-        "Maximum of 4 robots allowed, but you defined {}",
-        robots.len()
-    );
 
     shaman.robots.extend(
         robots
@@ -151,22 +89,19 @@ pub(crate) fn parse(filename: &str, s: &str) -> Result<Shaman> {
             Spanned {
                 span,
                 inner: Cell::Goal(n),
-            } => {
-                shaman
-                    .robots
-                    .get_mut(&n)
-                    .ok_or(ParseError::NoRobotForGoal {
-                        src: src.clone(),
-                        robot: n,
-                        goal: (span.location_offset(), 1).into(),
-                    })?
-                    .set_goal(
-                        &shaman.layout,
-                        Vertex::new(x, y),
-                        (span.location_offset(), 1).into(),
-                    )
-                    .wrap_err(format!("Robot {n}"))?;
-            }
+            } => shaman
+                .robots
+                .get_mut(&n)
+                .ok_or(ShamanError::NoRobotForGoal {
+                    src: src.clone(),
+                    robot: n,
+                    goal: (span.location_offset(), 1).into(),
+                })?
+                .set_goal(
+                    &shaman.layout,
+                    Vertex::new(x, y),
+                    (span.location_offset(), 1).into(),
+                )?,
             _ => {}
         }
     }

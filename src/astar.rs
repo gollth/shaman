@@ -10,8 +10,8 @@ use ordered_float::OrderedFloat;
 use rustc_hash::FxHashMap;
 
 use crate::{
+    error::ShamanError,
     layout::{Layout, Vertex},
-    parser::ParseError,
     robot::Location,
     route::Route,
 };
@@ -114,10 +114,7 @@ pub fn solve(
     start: (Vertex, SourceSpan),
     goal: (Vertex, SourceSpan),
     constraint: &RightOfWay,
-) -> miette::Result<Route> {
-    miette::ensure!(!layout.is_blocked(start.0), "Start not free: {}", start.0);
-    miette::ensure!(!layout.is_blocked(goal.0), "Goal not free: {}", goal.0);
-
+) -> Result<Route, ShamanError> {
     let mut open = BinaryHeap::new();
     let mut scores = FxHashMap::default();
     let s = Location {
@@ -205,7 +202,7 @@ pub fn solve(
         }
     }
 
-    Err(ParseError::RouteNotFound {
+    Err(ShamanError::RouteNotFound {
         src: layout.code(),
         start: start.1,
         goal: goal.1,
