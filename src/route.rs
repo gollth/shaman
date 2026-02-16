@@ -44,16 +44,14 @@ impl Route {
                 .iter()
                 .tuple_windows()
                 .filter(|(now, then)| {
-                    let edge_conflict = other
+                    other
                         .0
                         .iter()
                         .tuple_windows()
                         .find(|(a, _)| a.time == now.time)
                         .is_some_and(|(a, b)| {
                             b.position == now.position && a.position == then.position
-                        });
-
-                    edge_conflict
+                        })
                 })
                 .flat_map(|(a, b)| vec![a.position, b.position]),
         );

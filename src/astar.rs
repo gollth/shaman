@@ -75,7 +75,7 @@ impl From<&Route> for RightOfWay {
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     #[default]
-    WAIT,
+    Wait,
     N,
     W,
     E,
@@ -83,11 +83,11 @@ pub enum Action {
 }
 
 impl Action {
-    pub const ALL: [Self; 5] = [Self::N, Self::W, Self::S, Self::E, Self::WAIT];
+    pub const ALL: [Self; 5] = [Self::N, Self::W, Self::S, Self::E, Self::Wait];
 
     pub fn direction(&self) -> Vertex {
         match self {
-            Self::WAIT => Vertex::new(0, 0),
+            Self::Wait => Vertex::new(0, 0),
             Self::N => Vertex::new(0, -1),
             Self::S => Vertex::new(0, 1),
             Self::W => Vertex::new(-1, 0),
@@ -97,9 +97,9 @@ impl Action {
 
     fn cost(&self, previous: Self) -> f32 {
         match (previous, *self) {
-            (_, Self::WAIT) => 1.2, // slightly penalizing to encourage movement
+            (_, Self::Wait) => 1.2, // slightly penalizing to encourage movement
             (a, b) if a == b => 1., // moving in the same direction
-            (Self::WAIT, _) => 1.5, // Was stopped, now starting to move
+            (Self::Wait, _) => 1.5, // Was stopped, now starting to move
             _ => 3.,                // Changing direction, this is costly!
         }
     }
@@ -206,8 +206,7 @@ pub fn solve(
         src: layout.code(),
         start: start.1,
         goal: goal.1,
-    }
-    .into())
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

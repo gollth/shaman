@@ -23,8 +23,7 @@ pub(crate) fn parse(filename: &str, s: &str) -> Result<Shaman, ShamanError> {
         nom::Err::Error(e) => ShamanError::InvalidCell {
             src: src.clone(),
             highlight: (e.input.location_offset(), 1).into(),
-        }
-        .into(),
+        },
         nom::Err::Failure(e) => panic!("Failed to parse map: {e}"),
     })?;
 
@@ -66,8 +65,7 @@ pub(crate) fn parse(filename: &str, s: &str) -> Result<Shaman, ShamanError> {
             src: src.clone(),
             a: (a.location_offset(), 1).into(),
             b: (b.location_offset(), 1).into(),
-        }
-        .into());
+        });
     }
 
     shaman.robots.extend(
@@ -85,11 +83,12 @@ pub(crate) fn parse(filename: &str, s: &str) -> Result<Shaman, ShamanError> {
     }
 
     for ((x, y), cell) in grid {
-        match cell {
-            Spanned {
-                span,
-                inner: Cell::Goal(n),
-            } => shaman
+        if let Spanned {
+            span,
+            inner: Cell::Goal(n),
+        } = cell
+        {
+            shaman
                 .robots
                 .get_mut(&n)
                 .ok_or(ShamanError::NoRobotForGoal {
@@ -101,8 +100,7 @@ pub(crate) fn parse(filename: &str, s: &str) -> Result<Shaman, ShamanError> {
                     &shaman.layout,
                     Vertex::new(x, y),
                     (span.location_offset(), 1).into(),
-                )?,
-            _ => {}
+                )?
         }
     }
 
@@ -137,12 +135,13 @@ fn cell(s: Span) -> IResult<Spanned<Cell>> {
             .or(char('B'))
             .or(char('C'))
             .or(char('D'))
-            .map(|c| Cell::Robot(c)),
+            .map(Cell::Robot),
         char('a')
             .or(char('b'))
             .or(char('c'))
             .or(char('d'))
-            .map(|c: char| Cell::Goal(c.to_ascii_uppercase())),
+            .map(|c| c.to_ascii_uppercase())
+            .map(Cell::Goal),
     ))
     .parse(s)?;
     Ok((s, Spanned { span, inner: cell }))

@@ -108,7 +108,7 @@ impl Idea {
         for n in &order {
             let robot = self.robots.get_mut(n).unwrap();
 
-            robot.plan(&layout, &constraints)?;
+            robot.plan(layout, &constraints)?;
             constraints += robot.route().into();
         }
 
@@ -134,7 +134,7 @@ impl Idea {
             return None;
         }
 
-        child.plan(&layout).ok()?; // Plan would lead to deadlock
+        child.plan(layout).ok()?; // Plan would lead to deadlock
 
         Some(child)
     }
