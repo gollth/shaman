@@ -128,14 +128,14 @@ pub fn solve(
         came_from: None,
     });
 
-    // TODO: Detect standstill better, e.g. by having an upper bound for consequtive WAITs
-    const MAX_ITER: usize = 10000;
-    let mut i = 0;
     while let Some(item) = open.pop() {
-        if i >= MAX_ITER {
-            break;
+        if item.location.time > layout.free_cell_count() {
+            // Idea here is, that when we still haven't reached the goal by the time, we could have
+            // potentially reached every free cell in the layout, this branch is either waiting
+            // forever of stuck in a deadlocking loop. Don't pursue it anymore
+            continue;
         }
-        i += 1;
+
         if item.location.position == goal.0 {
             // Reached goal
             let mut current = Box::new(item);

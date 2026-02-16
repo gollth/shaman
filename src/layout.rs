@@ -76,6 +76,10 @@ impl Layout {
         }
     }
 
+    pub(crate) fn free_cell_count(&self) -> usize {
+        self.space.len()
+    }
+
     pub fn code(&self) -> NamedSource<String> {
         self.code.clone()
     }
