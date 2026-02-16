@@ -117,6 +117,7 @@ pub fn solve(
 ) -> Result<Route, ShamanError> {
     let mut open = BinaryHeap::new();
     let mut scores = FxHashMap::default();
+    let mut came_from = FxHashMap::default();
     let s = Location {
         time: 0,
         position: start.0,
@@ -125,7 +126,6 @@ pub fn solve(
     open.push(Item {
         cost: 0.0.into(),
         location: s,
-        came_from: None,
     });
 
     while let Some(item) = open.pop() {
@@ -138,11 +138,11 @@ pub fn solve(
 
         if item.location.position == goal.0 {
             // Reached goal
-            let mut current = Box::new(item);
+            let mut current = item.location;
             let mut route = VecDeque::new();
-            route.push_back(current.location);
-            while let Some(previous) = current.came_from {
-                route.push_front(previous.location);
+            route.push_back(current);
+            while let Some(previous) = came_from.get(&current).copied() {
+                route.push_front(previous);
                 current = previous;
             }
             return Ok(route.into_iter().collect());
@@ -181,10 +181,9 @@ pub fn solve(
                 // candidate would switch location with the priority constraint
                 continue;
             }
-            let previous_action = item
-                .came_from
-                .as_ref()
-                .map(|prev| here - prev.location.position)
+            let previous_action = came_from
+                .get(&item.location)
+                .map(|prev| here - prev.position)
                 .unwrap_or_default();
 
             let tentative_g = scores[&item.location] + action.cost(previous_action);
@@ -192,10 +191,10 @@ pub fn solve(
                 scores.insert(candidate, tentative_g);
                 // valid candidate
                 let h = candidate.position.distance_squared(goal.0);
+                came_from.insert(candidate, item.location);
                 let item = Item {
                     cost: OrderedFloat(tentative_g + h),
                     location: candidate,
-                    came_from: Some(Box::new(item.clone())),
                 };
                 open.push(item);
             }
@@ -214,7 +213,6 @@ pub fn solve(
 struct Item {
     location: Location,
     cost: OrderedFloat<f32>,
-    came_from: Option<Box<Item>>,
 }
 
 impl Ord for Item {
