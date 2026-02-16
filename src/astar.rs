@@ -96,10 +96,11 @@ impl Action {
     }
 
     fn cost(&self, previous: Self) -> f32 {
-        match (self, previous) {
-            (Self::WAIT, _) => 1.,
-            (a, b) if *a == b => 1.,
-            _ => 2.,
+        match (previous, *self) {
+            (_, Self::WAIT) => 1.2, // slightly penalizing to encourage movement
+            (a, b) if a == b => 1., // moving in the same direction
+            (Self::WAIT, _) => 1.5, // Was stopped, now starting to move
+            _ => 3.,                // Changing direction, this is costly!
         }
     }
 }
