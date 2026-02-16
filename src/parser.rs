@@ -82,26 +82,21 @@ pub(crate) fn parse(filename: &str, s: &str) -> Result<Shaman, ShamanError> {
         shaman.layout.block(v);
     }
 
-    for ((x, y), cell) in grid {
-        if let Spanned {
-            span,
-            inner: Cell::Goal(n),
-        } = cell
-        {
-            shaman
-                .robots
-                .get_mut(&n)
-                .ok_or(ShamanError::NoRobotForGoal {
-                    src: src.clone(),
-                    robot: n,
-                    goal: (span.location_offset(), 1).into(),
-                })?
-                .set_goal(
-                    &shaman.layout,
-                    Vertex::new(x, y),
-                    (span.location_offset(), 1).into(),
-                )?
-        }
+    for ((x, y), Spanned { span, inner }) in grid {
+        let (n, goal) = match inner {
+            Cell::Goal(n) => (n, Vertex::new(x, y)),
+            Cell::GoalSouth(n) => (n, Vertex::new(x, y + 1)),
+            _ => continue,
+        };
+        shaman
+            .robots
+            .get_mut(&n)
+            .ok_or(ShamanError::NoRobotForGoal {
+                src: src.clone(),
+                robot: n,
+                goal: (span.location_offset(), 1).into(),
+            })?
+            .set_goal(&shaman.layout, goal, (span.location_offset(), 1).into())?
     }
 
     Ok(shaman)
@@ -118,6 +113,7 @@ enum Cell {
     Robot(char),
     Goal(char),
     Obstacle,
+    GoalSouth(char),
 }
 
 fn grid(s: Span) -> IResult<Vec<Vec<Spanned<Cell>>>> {
@@ -142,6 +138,12 @@ fn cell(s: Span) -> IResult<Spanned<Cell>> {
             .or(char('d'))
             .map(|c| c.to_ascii_uppercase())
             .map(Cell::Goal),
+        char('ⓐ')
+            .or(char('ⓑ'))
+            .or(char('ⓒ'))
+            .or(char('ⓓ'))
+            .map(|c| ((c as u32 - 0x24D0 + 0x41) as u8) as char)
+            .map(Cell::GoalSouth),
     ))
     .parse(s)?;
     Ok((s, Spanned { span, inner: cell }))

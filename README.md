@@ -18,3 +18,4 @@ To define you own experiment create a text file and "draw" it inside
 * `#` or `█`: an obstacle, where robots cannot move
 * `A` to `D`: robot's starting locations
 * `a` to `d`: corresponding robot goals
+* `ⓐ` to `ⓓ`: set the corresponding robot's goal to the cell below. Useful if on this cell is already another robot right now
