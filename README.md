@@ -1,4 +1,4 @@
-# SHAMAN
+# shaman
 
 Collision Based Search playground for experimenting with multi-agent path finding algorithms
 
@@ -6,7 +6,9 @@ Collision Based Search playground for experimenting with multi-agent path findin
 cargo run maps/narrow.txt
 ```
 
-![pitch](./media/pitch.gif)
+| Maze | Escalator | Roundabout |
+|:-:|:-:|:-:|
+| ![pitch](./media/maze.gif) | ![fourway](./media/escalator.gif) | ![roundabout](./media/roundabout.gif) |
 
 ## Maps
 
