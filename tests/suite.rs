@@ -10,8 +10,9 @@ fn regression(#[files("maps/*.txt")] file: PathBuf) {
 #[rstest]
 #[case::no_path("maps/impossible/no-path.txt", "No route found")]
 #[case::invalid_symbol("maps/impossible/invalid-symbol.txt", "Expected either an obstacle")]
+#[case::no_space_to_evade("maps/impossible/no-space-to-evade.txt", "Ran out of ideas")]
 fn impossible(#[case] file: &str, #[case] expectation: &str) {
-    let e = Shaman::parse(file).unwrap_err();
+    let e = Shaman::parse(file).and_then(|s| s.solve()).unwrap_err();
     let msg = format!("{e:#}");
     assert!(
         msg.contains(expectation),
