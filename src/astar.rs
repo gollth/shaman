@@ -19,12 +19,13 @@ use crate::{
 /// A priority constraint, which this [crate::astar::solve()] needs to respect
 #[derive(Debug, Clone, Default)]
 pub struct RightOfWay {
+    // TODO: At this point this really should become a HashSet...
     temporary: FxHashMap<usize, Vertex>,
     permanent: Vec<(RangeFrom<usize>, Vertex)>,
 }
 
 impl RightOfWay {
-    fn at(&self, time: usize) -> Option<Vertex> {
+    pub(crate) fn at(&self, time: usize) -> Option<Vertex> {
         self.temporary
             .get(&time)
             .or_else(|| {

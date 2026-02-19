@@ -1,9 +1,8 @@
-use rustc_hash::FxHashSet;
 use std::collections::VecDeque;
 
 use itertools::Itertools;
 
-use crate::{Time, layout::Vertex, robot::Location};
+use crate::{Time, astar::RightOfWay, layout::Vertex, robot::Location};
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Route(VecDeque<Location>);
@@ -28,34 +27,31 @@ impl Route {
     }
 
     pub fn intersection(&self, other: &Self) -> Vec<Vertex> {
-        let a = self.0.iter().cloned().collect::<FxHashSet<_>>();
-        let b = other.0.iter().cloned().collect::<FxHashSet<_>>();
-        let mut intersection = a.intersection(&b).map(|l| l.position).collect::<Vec<_>>();
-        intersection.extend(
-            self.0
-                .back()
-                .zip(other.0.back())
-                .filter(|(a, b)| a.position == b.position)
-                .map(|(a, _)| a.position),
-        );
+        let a = RightOfWay::from(self);
+        let b = RightOfWay::from(other);
+        (0..=self.duration().max(other.duration()))
+            .tuple_windows()
+            .filter_map(|(now, then)| {
+                let a_now = a.at(now)?;
+                let b_now = b.at(now)?;
+                let a_then = a.at(then)?;
+                let b_then = b.at(then)?;
 
-        intersection.extend(
-            self.0
-                .iter()
-                .tuple_windows()
-                .filter(|(now, then)| {
-                    other
-                        .0
-                        .iter()
-                        .tuple_windows()
-                        .find(|(a, _)| a.time == now.time)
-                        .is_some_and(|(a, b)| {
-                            b.position == now.position && a.position == then.position
-                        })
-                })
-                .flat_map(|(a, b)| vec![a.position, b.position]),
-        );
-        intersection
+                if a_now == b_now {
+                    // Node conflict
+                    return Some(vec![a_now]);
+                }
+
+                if a_now == b_then && a_then == b_now {
+                    // Edge Conflict
+                    return Some(vec![a_now, b_now]);
+                }
+
+                // No conflict
+                None
+            })
+            .flatten()
+            .collect()
     }
 
     pub fn pop(&mut self) -> Option<Location> {
