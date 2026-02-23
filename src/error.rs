@@ -6,7 +6,7 @@ use thiserror::Error;
 #[derive(Error, Debug, Diagnostic)]
 pub enum ShamanError {
     #[error(
-        "Expected either an obstacle (# or █), a free cell (space), a robot (A..D) or a goal (a..d)"
+        "Expected either an obstacle (# or █), a free cell (space), a robot (A..Z) or a goal (a..z) or any character defined in a definition above"
     )]
     InvalidCell {
         #[source_code]

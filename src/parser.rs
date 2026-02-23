@@ -1,12 +1,20 @@
+use std::collections::HashMap;
+
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use miette::{NamedSource, Result};
 use nom::{
-    Parser,
+    AsChar, Input, Parser,
     branch::alt,
-    character::complete::{char, newline},
+    character::{
+        anychar,
+        complete::{char, newline, space0},
+        one_of,
+    },
     combinator::eof,
-    multi::many_till,
+    error::ParseError,
+    multi::{many_till, separated_list0, separated_list1},
+    sequence::terminated,
 };
 use nom_locate::{LocatedSpan, position};
 
@@ -18,7 +26,7 @@ type IResult<'a, T> = nom::IResult<Span<'a>, T>;
 pub(crate) fn parse(filename: &str, s: &str) -> Result<Shaman, ShamanError> {
     let src = NamedSource::new(filename, s.to_string());
 
-    let (_, grid) = grid.parse(Span::new(s)).map_err(|e| match e {
+    let (_, mut scenario) = scenario(Span::new(s)).map_err(|e| match e {
         nom::Err::Incomplete(more) => panic!("Failed to parse map, expected more input: {more:?}"),
         nom::Err::Error(e) => ShamanError::InvalidCell {
             src: src.clone(),
@@ -27,7 +35,8 @@ pub(crate) fn parse(filename: &str, s: &str) -> Result<Shaman, ShamanError> {
         nom::Err::Failure(e) => panic!("Failed to parse map: {e}"),
     })?;
 
-    let grid = grid
+    let grid = scenario
+        .grid
         .into_iter()
         .enumerate()
         .flat_map(|(y, row)| {
@@ -74,6 +83,19 @@ pub(crate) fn parse(filename: &str, s: &str) -> Result<Shaman, ShamanError> {
             .map(|((x, y), s, n)| (n, Robot::new(n, x, y, (s.location_offset(), 1).into()))),
     );
 
+    for robot in shaman.robots.keys() {
+        let default_goal = robot.to_ascii_lowercase();
+        scenario
+            .definitions
+            .entry(*robot)
+            .and_modify(|defs| {
+                if defs.is_empty() {
+                    defs.push(default_goal)
+                }
+            })
+            .or_insert(vec![default_goal]);
+    }
+
     for v in grid
         .iter()
         .filter(|(_, cell)| cell.inner.is_obstacle())
@@ -82,38 +104,72 @@ pub(crate) fn parse(filename: &str, s: &str) -> Result<Shaman, ShamanError> {
         shaman.layout.block(v);
     }
 
-    for ((x, y), Spanned { span, inner }) in grid {
-        let (n, goal) = match inner {
-            Cell::Goal(n) => (n, Vertex::new(x, y)),
-            Cell::GoalSouth(n) => (n, Vertex::new(x, y + 1)),
-            _ => continue,
+    let labels = grid
+        .into_iter()
+        .filter_map(|((x, y), Spanned { span, inner })| match inner {
+            Cell::Label(label) => Some((label, (span, Vertex::new(x, y)))),
+            Cell::GoalSouth(n) => Some((n, (span, Vertex::new(x, y + 1)))),
+            _ => None,
+        })
+        .collect::<HashMap<_, _>>();
+
+    if let Some(highlight) = labels
+        .iter()
+        .find(|(l, _)| !scenario.definitions.values().flatten().contains(*l))
+        .map(|(_, (span, _))| (span.location_offset(), 1).into())
+    {
+        return Err(ShamanError::InvalidCell {
+            src: src.clone(),
+            highlight,
+        });
+    }
+
+    for robot in shaman.robots.values_mut() {
+        let Some(def) = scenario.definitions.get(&robot.name()) else {
+            println!("...");
+            continue;
         };
-        shaman
-            .robots
-            .get_mut(&n)
-            .ok_or(ShamanError::NoRobotForGoal {
-                src: src.clone(),
-                robot: n,
-                goal: (span.location_offset(), 1).into(),
-            })?
-            .set_goal(&shaman.layout, goal, (span.location_offset(), 1).into())?
+
+        for (span, goal) in def
+            .iter()
+            .map(|l| labels.get(l).expect("defined a label which is never used"))
+            .copied()
+        {
+            robot.add_goal(goal, (span.location_offset(), 1).into());
+        }
     }
 
     Ok(shaman)
 }
 
+#[derive(Debug)]
 struct Spanned<'a, T> {
     span: Span<'a>,
     inner: T,
+}
+
+#[derive(Debug)]
+struct Scenario<'a> {
+    definitions: HashMap<char, Vec<char>>,
+    grid: Vec<Vec<Spanned<'a, Cell>>>,
 }
 
 #[derive(Debug, Clone, Copy, EnumAsInner)]
 enum Cell {
     Free,
     Robot(char),
-    Goal(char),
+    Label(char),
     Obstacle,
     GoalSouth(char),
+}
+
+fn scenario(s: Span) -> IResult<Scenario> {
+    (definitions, grid)
+        .map(|(goals, grid)| Scenario {
+            grid,
+            definitions: goals,
+        })
+        .parse(s)
 }
 
 fn grid(s: Span) -> IResult<Vec<Vec<Spanned<Cell>>>> {
@@ -122,28 +178,35 @@ fn grid(s: Span) -> IResult<Vec<Vec<Spanned<Cell>>>> {
         .parse(s)
 }
 
+fn definitions(s: Span) -> IResult<HashMap<char, Vec<char>>> {
+    let (s, defs) = separated_list0(
+        newline,
+        (
+            spaced(one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ")),
+            spaced(char('=')),
+            spaced(char('[')),
+            separated_list1(spaced(char(',')), anychar),
+            spaced(char(']')),
+        )
+            .map(|(robot, _, _, goals, _)| (robot, goals)),
+    )
+    .parse(s)?;
+    Ok((s, defs.into_iter().collect()))
+}
+
 fn cell(s: Span) -> IResult<Spanned<Cell>> {
     let (s, span) = position(s)?;
     let (s, cell) = alt((
         char(' ').map(always(Cell::Free)),
         char('#').or(char('█')).map(always(Cell::Obstacle)),
-        char('A')
-            .or(char('B'))
-            .or(char('C'))
-            .or(char('D'))
-            .map(Cell::Robot),
-        char('a')
-            .or(char('b'))
-            .or(char('c'))
-            .or(char('d'))
-            .map(|c| c.to_ascii_uppercase())
-            .map(Cell::Goal),
+        one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ").map(Cell::Robot),
         char('ⓐ')
             .or(char('ⓑ'))
             .or(char('ⓒ'))
             .or(char('ⓓ'))
             .map(|c| ((c as u32 - 0x24D0 + 0x41) as u8) as char)
             .map(Cell::GoalSouth),
+        anychar.map(|c| Cell::Label(c)),
     ))
     .parse(s)?;
     Ok((s, Spanned { span, inner: cell }))
@@ -155,4 +218,14 @@ pub fn always<A: Copy, B>(x: A) -> impl Fn(B) -> A {
 
 pub fn ignore_delim<A, B>() -> impl Fn((A, B)) -> A {
     |(a, _)| a
+}
+
+fn spaced<I, O, E, P>(inner: P) -> impl Parser<I, Output = O, Error = E>
+where
+    I: Input,
+    I::Item: AsChar,
+    E: ParseError<I>,
+    P: Parser<I, Output = O, Error = E>,
+{
+    terminated(inner, space0)
 }

@@ -27,7 +27,7 @@ pub struct Robot {
     color: String,
     position: (Vertex, SourceSpan),
     route: Route,
-    goal: Option<(Vertex, SourceSpan)>,
+    goals: Vec<(Vertex, SourceSpan)>,
 }
 
 impl Robot {
@@ -37,6 +37,7 @@ impl Robot {
             'B' => Rgb(255, 0, 0),
             'C' => Rgb(0, 255, 0),
             'D' => Rgb(255, 255, 0),
+            'E' => Rgb(0, 255, 255),
             _ => panic!(),
         };
         Self {
@@ -44,7 +45,7 @@ impl Robot {
             color: format!("{}", Fg(color)),
             position: (Vertex::new(x, y), span),
             route: Default::default(),
-            goal: None,
+            goals: Default::default(),
         }
     }
 
@@ -56,21 +57,8 @@ impl Robot {
         self.position
     }
 
-    pub fn set_goal(
-        &mut self,
-        layout: &Layout,
-        v: Vertex,
-        span: SourceSpan,
-    ) -> Result<(), ShamanError> {
-        if let Some((_, s)) = self.goal {
-            return Err(ShamanError::DuplicateGoals {
-                src: layout.code(),
-                a: span,
-                b: s,
-            });
-        }
-        self.goal = Some((v, span));
-        Ok(())
+    pub fn add_goal(&mut self, v: Vertex, span: SourceSpan) {
+        self.goals.push((v, span));
     }
 
     pub fn route(&self) -> &Route {
@@ -94,8 +82,8 @@ impl Robot {
         layout: &Layout,
         constraint: &RightOfWay,
     ) -> Result<(), ShamanError> {
-        if let Some(goal) = self.goal {
-            self.route = crate::astar::solve(layout, self.position(), goal, constraint)?;
+        if let Some(goal) = self.goals.first() {
+            self.route = crate::astar::solve(layout, self.position(), *goal, constraint)?;
         }
         Ok(())
     }

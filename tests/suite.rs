@@ -10,6 +10,10 @@ fn regression(#[files("maps/*.txt")] file: PathBuf) {
 #[rstest]
 #[case::no_path("maps/impossible/no-path.txt", "No route found")]
 #[case::invalid_symbol("maps/impossible/invalid-symbol.txt", "Expected either an obstacle")]
+#[case::invalid_definition(
+    "maps/impossible/invalid-definition.txt",
+    "Expected either an obstacle"
+)]
 #[case::no_space_to_evade("maps/impossible/no-space-to-evade.txt", "Ran out of ideas")]
 #[case::goals_blocking("maps/impossible/goals-blocking.txt", "Ran out of ideas")]
 #[case::magic_swap("maps/impossible/magic-swap.txt", "Ran out of ideas")]
