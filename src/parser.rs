@@ -106,10 +106,8 @@ pub(crate) fn parse(filename: &str, s: &str) -> Result<Shaman, ShamanError> {
 
     let labels = grid
         .into_iter()
-        .filter_map(|((x, y), Spanned { span, inner })| match inner {
-            Cell::Label(label) => Some((label, (span, Vertex::new(x, y)))),
-            Cell::GoalSouth(n) => Some((n, (span, Vertex::new(x, y + 1)))),
-            _ => None,
+        .filter_map(|((x, y), Spanned { span, inner })| {
+            Some((*inner.as_label()?, (span, Vertex::new(x, y))))
         })
         .collect::<HashMap<_, _>>();
 
@@ -160,7 +158,6 @@ enum Cell {
     Robot(char),
     Label(char),
     Obstacle,
-    GoalSouth(char),
 }
 
 fn scenario(s: Span) -> IResult<Scenario> {
@@ -200,12 +197,6 @@ fn cell(s: Span) -> IResult<Spanned<Cell>> {
         char(' ').map(always(Cell::Free)),
         char('#').or(char('█')).map(always(Cell::Obstacle)),
         one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ").map(Cell::Robot),
-        char('ⓐ')
-            .or(char('ⓑ'))
-            .or(char('ⓒ'))
-            .or(char('ⓓ'))
-            .map(|c| ((c as u32 - 0x24D0 + 0x41) as u8) as char)
-            .map(Cell::GoalSouth),
         anychar.map(|c| Cell::Label(c)),
     ))
     .parse(s)?;
