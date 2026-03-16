@@ -1,5 +1,5 @@
 use rstest::rstest;
-use shaman::Shaman;
+use shaman::{Params, Shaman};
 use std::path::PathBuf;
 
 #[rstest]
@@ -18,7 +18,15 @@ fn regression(#[files("maps/*.txt")] file: PathBuf) {
 #[case::goals_blocking("maps/impossible/goals-blocking.txt", "Ran out of ideas")]
 #[case::magic_swap("maps/impossible/magic-swap.txt", "Ran out of ideas")]
 fn impossible(#[case] file: &str, #[case] expectation: &str) {
-    let e = Shaman::parse(file).and_then(|s| s.solve()).unwrap_err();
+    let e = Shaman::parse(file)
+        .map(|s| {
+            s.with_params(Params {
+                window: 16,
+                replan: 8,
+            })
+        })
+        .and_then(|s| s.solve())
+        .unwrap_err();
     let msg = format!("{e:#}");
     assert!(
         msg.contains(expectation),

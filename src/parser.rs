@@ -18,7 +18,7 @@ use nom::{
 };
 use nom_locate::{LocatedSpan, position};
 
-use crate::{Shaman, error::ShamanError, layout::Vertex, robot::Robot};
+use crate::{Shaman, Time, error::ShamanError, layout::Vertex, robot::Robot};
 
 type Span<'a> = LocatedSpan<&'a str>;
 type IResult<'a, T> = nom::IResult<Span<'a>, T>;
@@ -77,11 +77,14 @@ pub(crate) fn parse(filename: &str, s: &str) -> Result<Shaman, ShamanError> {
         });
     }
 
-    shaman.robots.extend(
-        robots
-            .into_iter()
-            .map(|((x, y), s, n)| (n, Robot::new(n, x, y, (s.location_offset(), 1).into()))),
-    );
+    shaman
+        .robots
+        .extend(robots.into_iter().map(|((x, y), s, n)| {
+            (
+                n,
+                Robot::new(n, x, y, (s.location_offset(), 1).into(), Time::default()),
+            )
+        }));
 
     for robot in shaman.robots.keys() {
         let default_goal = robot.to_ascii_lowercase();
@@ -197,7 +200,7 @@ fn cell(s: Span) -> IResult<Spanned<Cell>> {
         char(' ').map(always(Cell::Free)),
         char('#').or(char('█')).map(always(Cell::Obstacle)),
         one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ").map(Cell::Robot),
-        anychar.map(|c| Cell::Label(c)),
+        anychar.map(Cell::Label),
     ))
     .parse(s)?;
     Ok((s, Spanned { span, inner: cell }))

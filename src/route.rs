@@ -7,6 +7,25 @@ use crate::{Time, astar::RightOfWay, layout::Vertex, robot::Location};
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Route(VecDeque<Location>);
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum Segment {
+    Complete(Route),
+    Partial(Route),
+}
+impl Segment {
+    pub(crate) fn route(&self) -> &Route {
+        match self {
+            Self::Complete(r) | Self::Partial(r) => r,
+        }
+    }
+
+    pub(crate) fn into_route(self) -> Route {
+        match self {
+            Self::Complete(r) | Self::Partial(r) => r,
+        }
+    }
+}
+
 impl FromIterator<Location> for Route {
     fn from_iter<T: IntoIterator<Item = Location>>(iter: T) -> Self {
         Self(iter.into_iter().collect())
@@ -24,6 +43,10 @@ impl Route {
 
     pub fn conflicts(&self, other: &Self) -> bool {
         !self.intersection(other).is_empty()
+    }
+
+    pub fn take(&self, window: usize) -> Self {
+        self.0.iter().copied().take(window).collect()
     }
 
     pub fn intersection(&self, other: &Self) -> Vec<Vertex> {
@@ -64,6 +87,10 @@ impl Route {
         }
     }
 
+    pub fn last_location(&self) -> Location {
+        self.0.back().copied().unwrap()
+    }
+
     pub fn pop(&mut self) -> Option<Location> {
         self.0.pop_front()
     }
@@ -74,5 +101,9 @@ impl Route {
 
     pub fn clear(&mut self) {
         self.0.clear();
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 }

@@ -13,7 +13,7 @@ use crate::{
     error::ShamanError,
     layout::{Layout, Vertex},
     robot::Location,
-    route::Route,
+    route::{Route, Segment},
 };
 
 /// A priority constraint, which this [crate::astar::solve()] needs to respect
@@ -106,17 +106,36 @@ impl Action {
     }
 }
 
+/// Normal A* without any priority constraints
+///
+/// Quicker than [solve()] and is able to return an `Err` if no path exists
+pub(crate) fn vacuum(
+    layout: &Layout,
+    source_span: (Location, SourceSpan),
+    goal_span: (Vertex, SourceSpan),
+) -> Result<Route, ShamanError> {
+    let segment = solve(
+        layout,
+        source_span,
+        goal_span,
+        &RightOfWay::default(),
+        usize::MAX,
+    )?;
+    Ok(segment.into_route())
+}
+
 /// Priority-aware A*
 ///
 /// Plan the shortest path from `start` -> `goal` avoiding static obstacles on `layout`.
 /// Also avoid the dynamic obstacle (other robot's path) defined by `constraint`, i.e. by waiting
-/// or rerouting
+/// or rerouting. The `constraints` are only considered up a a time window of `horizon`.
 pub fn solve(
     layout: &Layout,
     start: (Location, SourceSpan),
     goal: (Vertex, SourceSpan),
     constraint: &RightOfWay,
-) -> Result<Route, ShamanError> {
+    window: usize,
+) -> Result<Segment, ShamanError> {
     let mut open = BinaryHeap::new();
     let mut scores = FxHashMap::default();
     let mut came_from = FxHashMap::default();
@@ -127,24 +146,22 @@ pub fn solve(
         location: s,
     });
 
-    while let Some(item) = open.pop() {
-        if item.location.time > layout.free_cell_count() {
-            // Idea here is, that when we still haven't reached the goal by the time, we could have
-            // potentially reached every free cell in the layout, this branch is either waiting
-            // forever of stuck in a deadlocking loop. Don't pursue it anymore
-            continue;
-        }
+    let horizon = start.0.time.saturating_add(window);
+    let mut best_node = s;
+    let mut min_h = s.position.distance_squared(goal.0);
 
+    while let Some(item) = open.pop() {
         if item.location.position == goal.0 {
             // Reached goal
-            let mut current = item.location;
-            let mut route = VecDeque::new();
-            route.push_back(current);
-            while let Some(previous) = came_from.get(&current).copied() {
-                route.push_front(previous);
-                current = previous;
-            }
-            return Ok(route.into_iter().collect());
+            return Ok(Segment::Complete(reconstruct_route(
+                item.location,
+                &came_from,
+            )));
+        }
+
+        if item.location.time > layout.free_cell_count() {
+            // Safety timeout
+            continue;
         }
 
         // Node expansion
@@ -162,24 +179,26 @@ pub fn solve(
                 continue;
             }
 
-            // Same location constraint check
-            if constraint
-                .at(then)
-                .is_some_and(|obstacle| obstacle == candidate.position)
-            {
-                // candidate would collide with a priority constraint in the future
-                continue;
+            // Conflict check (only within window)
+            if candidate.time <= horizon {
+                if constraint
+                    .at(then)
+                    .is_some_and(|obstacle| obstacle == candidate.position)
+                {
+                    // candidate would collide with a priority constraint in the future
+                    continue;
+                }
+
+                if constraint
+                    .at(now)
+                    .zip(constraint.at(then))
+                    .is_some_and(|(now, then)| now == there && then == here)
+                {
+                    // candidate would switch location with the priority constraint
+                    continue;
+                }
             }
 
-            // Swapping location constraint check
-            if constraint
-                .at(now)
-                .zip(constraint.at(then))
-                .is_some_and(|(now, then)| now == there && then == here)
-            {
-                // candidate would switch location with the priority constraint
-                continue;
-            }
             let previous_action = came_from
                 .get(&item.location)
                 .map(|prev| here - prev.position)
@@ -190,6 +209,10 @@ pub fn solve(
                 scores.insert(candidate, tentative_g);
                 // valid candidate
                 let h = candidate.position.distance_squared(goal.0);
+                if h < min_h {
+                    min_h = h;
+                    best_node = candidate;
+                }
                 came_from.insert(candidate, item.location);
                 let item = Item {
                     cost: OrderedFloat(tentative_g + h),
@@ -200,11 +223,26 @@ pub fn solve(
         }
     }
 
+    if best_node.time >= horizon {
+        // Goal not reached within horizon, return the best path found within the window
+        return Ok(Segment::Partial(reconstruct_route(best_node, &came_from)));
+    }
+
     Err(ShamanError::RouteNotFound {
         src: layout.code(),
         start: start.1,
         goal: goal.1,
     })
+}
+
+fn reconstruct_route(mut current: Location, came_from: &FxHashMap<Location, Location>) -> Route {
+    let mut route = VecDeque::new();
+    route.push_back(current);
+    while let Some(previous) = came_from.get(&current).copied() {
+        route.push_front(previous);
+        current = previous;
+    }
+    route.into_iter().collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

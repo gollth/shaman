@@ -6,11 +6,13 @@ use miette::{Result, miette};
 use petgraph::{acyclic::Acyclic, algo::toposort, data::Build, prelude::*};
 use rustc_hash::FxHashMap;
 
-use crate::{Shaman, astar::RightOfWay, layout::Layout, robot::Robot};
+use crate::{Params, Shaman, Time, astar::RightOfWay, layout::Layout, robot::Robot};
 
 /// Main entry point for finding the best [Idea] for a MAPF problem
 #[derive(Debug)]
 pub struct Pbs {
+    time: Time,
+    params: Params,
     layout: Layout,
     queue: BinaryHeap<Idea>,
 }
@@ -19,11 +21,14 @@ impl From<Shaman> for Pbs {
     fn from(value: Shaman) -> Self {
         let mut queue = BinaryHeap::new();
         queue.push(Idea {
+            params: value.params,
             robots: value.robots,
             priorities: Acyclic::new(),
         });
 
         Self {
+            time: value.time,
+            params: value.params,
             layout: value.layout,
             queue,
         }
@@ -31,22 +36,25 @@ impl From<Shaman> for Pbs {
 }
 
 impl Pbs {
-    /// Solve the MAPF problem by:
+    /// Solve the MAPD problem by:
     ///
     /// 1. Finding a collision between any pair of robots
     /// 2. Fixing one of the two and make the other use the first as [RightOfWay] constraint
     /// 3. Repeating 2. with both robots flipped
     pub fn solve(mut self) -> Result<Shaman> {
+        let w = self.params.window;
         while let Some(idea) = self.queue.pop() {
             let Some((a, b)) = idea
                 .robots
                 .values()
                 .tuple_combinations()
-                .find(|(a, b)| a.route().conflicts(b.route()))
+                .find(|(a, b)| a.route().take(w).conflicts(&b.route().take(w)))
                 .map(|(a, b)| (a.name(), b.name()))
             else {
                 // No more conflicts (=
                 return Ok(Shaman {
+                    time: self.time,
+                    params: self.params,
                     layout: self.layout,
                     robots: idea
                         .robots
@@ -70,6 +78,7 @@ impl Pbs {
 /// A single possible solution to the overall MAPF problem
 #[derive(Debug, Default, Clone)]
 pub struct Idea {
+    params: Params,
     priorities: Acyclic<StableDiGraph<char, ()>>,
     robots: FxHashMap<char, Robot>,
 }
@@ -108,7 +117,7 @@ impl Idea {
         for n in &order {
             let robot = self.robots.get_mut(n).unwrap();
 
-            robot.plan(layout, &constraints)?;
+            robot.plan(layout, &constraints, self.params.window)?;
             constraints += robot.route().into();
         }
 

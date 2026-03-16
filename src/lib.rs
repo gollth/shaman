@@ -6,7 +6,8 @@ mod pbs;
 mod robot;
 mod route;
 
-use std::{fmt::Display, path::Path, time::Duration};
+use derivative::Derivative;
+use std::{fmt::Display, iter::repeat, path::Path, time::Duration};
 use termion::{
     color::{Fg, Magenta},
     cursor,
@@ -27,6 +28,8 @@ pub type Time = usize;
 /// Top level entry point for defining a layout & a list of robots
 #[derive(Debug)]
 pub struct Shaman {
+    time: Time,
+    params: Params,
     robots: FxHashMap<char, Robot>,
     layout: Layout,
 }
@@ -38,16 +41,27 @@ impl Shaman {
 
         let mut sim: Shaman = parser::parse(&file, &content)?;
         for robot in sim.robots.values_mut() {
-            robot.plan(&sim.layout, &Default::default())?;
+            robot.plan(&sim.layout, &Default::default(), Params::default().window)?;
         }
         Ok(sim)
     }
 
     fn new(code: NamedSource<String>, width: i32, height: i32) -> Self {
         Self {
+            time: Time::default(),
+            params: Params::default(),
             robots: Default::default(),
             layout: Layout::empty(code, width as usize, height as usize),
         }
+    }
+
+    pub fn with_params(mut self, params: Params) -> Self {
+        self.params = params;
+        self
+    }
+
+    fn time_to_replan(&self) -> bool {
+        self.time.is_multiple_of(self.params.replan)
     }
 
     pub fn simulate(&mut self) {
@@ -60,21 +74,20 @@ impl Shaman {
         Pbs::from(self).solve()
     }
 
-    fn simulation_duration(&self) -> Time {
-        self.robots
-            .values()
-            .map(|r| r.route().duration())
-            .max()
-            .unwrap_or_default()
+    pub fn finished(&self) -> bool {
+        self.robots.values().all(|r| r.is_idle() && !r.has_goals())
     }
 }
 
 impl Display for Shaman {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "╭")?;
-        for _ in 0..self.layout.width() {
-            write!(f, "─")?;
-        }
+        let title = if self.time_to_replan() {
+            format!("⏱t={} ", self.time)
+        } else {
+            format!(" t={} ", self.time)
+        };
+        write!(f, "{:─^1$}", title, self.layout.width())?;
 
         let intersections = self
             .robots
@@ -82,6 +95,28 @@ impl Display for Shaman {
             .tuple_combinations()
             .flat_map(|(a, b)| a.route().intersection(b.route()))
             .collect::<FxHashSet<_>>();
+        let horizons = self
+            .robots
+            .values()
+            .flat_map(|r| {
+                r.route()
+                    .iter()
+                    .take(self.params.window)
+                    .map(|l| l.position)
+                    .zip(repeat(r.color().to_owned()))
+            })
+            .collect::<FxHashMap<_, _>>();
+        let routes = self
+            .robots
+            .values()
+            .flat_map(|r| {
+                r.route()
+                    .iter()
+                    .map(|l| l.position)
+                    .zip(repeat(r.color().to_owned()))
+            })
+            .collect::<FxHashMap<_, _>>();
+
         writeln!(f, "╮")?;
         for y in 0..self.layout.height() {
             write!(f, "│")?;
@@ -98,12 +133,10 @@ impl Display for Shaman {
                             .find_map(|r| Some((r.color(), r.goals().position(|g| g == v)? + 1)))
                         {
                             write!(f, "{color}{goal}{Reset}")?;
-                        } else if let Some(robot) = self
-                            .robots
-                            .values()
-                            .find(|r| r.route().iter().any(|n| n.position == v))
-                        {
-                            write!(f, "{}", robot.pathicon())?;
+                        } else if let Some(color) = horizons.get(&v) {
+                            write!(f, "{color}▪{Reset}")?;
+                        } else if let Some(color) = routes.get(&v) {
+                            write!(f, "{color}·{Reset}")?;
                         } else if self.layout.is_blocked(v) {
                             // Obstacle
                             write!(f, "█")?;
@@ -125,30 +158,54 @@ impl Display for Shaman {
     }
 }
 
-pub fn level(map: &Path, fps: f32, stop: bool) -> Result<()> {
+pub const DEFAULT_REPLAN: usize = 5;
+pub const DEFAULT_WINDOW: usize = 5;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Derivative)]
+#[derivative(Default)]
+pub struct Params {
+    #[derivative(Default(value = "DEFAULT_WINDOW"))]
+    pub window: usize,
+    #[derivative(Default(value = "DEFAULT_REPLAN"))]
+    pub replan: usize,
+}
+
+pub fn level(map: &Path, params: Params, fps: f32, stop: bool, keep: bool) -> Result<()> {
     miette::set_hook(Box::new(|_| {
         Box::new(miette::MietteHandlerOpts::new().context_lines(10).build())
     }))?;
 
-    let mut sim = Shaman::parse(map)?;
-    if !stop {
-        sim = sim.solve()?;
+    let mut sim = Shaman::parse(map)?.with_params(params);
+    if stop {
+        println!("{sim}");
+        return Ok(());
     }
 
     if fps == 0. {
+        sim = sim.solve()?;
         println!("{sim}");
         return Ok(());
     }
 
     let dt = Duration::from_secs_f32(1. / fps);
     print!("{}", cursor::Hide);
-    for _ in 0..=sim.simulation_duration() {
+    while !sim.finished() {
+        if sim.time_to_replan() {
+            sim = sim.solve()?;
+        }
         sim.simulate();
-        print!(
-            "{sim}{}{}",
-            cursor::Left(sim.layout.width() as u16 + 2),
-            cursor::Up(sim.layout.height() as u16 + 2)
-        );
+        sim.time += 1;
+
+        print!("{sim}");
+        if !keep {
+            print!(
+                "{}{}",
+                cursor::Left(sim.layout.width() as u16 + 2),
+                cursor::Up(sim.layout.height() as u16 + 2)
+            );
+        } else {
+            println!();
+        }
         std::thread::sleep(dt);
     }
     print!("{sim}{}", cursor::Show);
