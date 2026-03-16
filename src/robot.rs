@@ -8,7 +8,7 @@ use termion::{
 
 use crate::{
     Time,
-    astar::RightOfWay,
+    astar::{self, RightOfWay},
     error::ShamanError,
     layout::{Layout, Vertex},
     route::Route,
@@ -61,12 +61,20 @@ impl Robot {
         self.goals.push((v, span));
     }
 
+    pub fn goals(&self) -> impl Iterator<Item = Vertex> {
+        self.goals.iter().map(|g| g.0)
+    }
+
     pub fn route(&self) -> &Route {
         &self.route
     }
 
+    pub fn color(&self) -> &str {
+        &self.color
+    }
+
     pub fn pathicon(&self) -> String {
-        format!("{}·{Reset}", self.color)
+        format!("{}·{Reset}", self.color())
     }
 
     pub(crate) fn simulate(&mut self) {
@@ -82,8 +90,21 @@ impl Robot {
         layout: &Layout,
         constraint: &RightOfWay,
     ) -> Result<(), ShamanError> {
-        if let Some(goal) = self.goals.first() {
-            self.route = crate::astar::solve(layout, self.position(), *goal, constraint)?;
+        let (position, mut source_span) = self.position();
+        let mut location = Location { position, time: 0 };
+
+        self.route.clear();
+        for (goal, goal_span) in self.goals.iter().cloned() {
+            self.route.extend(astar::solve(
+                layout,
+                (location, source_span),
+                (goal, goal_span),
+                constraint,
+            )?);
+            self.route.stay(3); // simulate load handling
+            location.time = self.route.duration() + 1;
+            location.position = goal;
+            source_span = goal_span;
         }
         Ok(())
     }

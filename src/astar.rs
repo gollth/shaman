@@ -113,17 +113,14 @@ impl Action {
 /// or rerouting
 pub fn solve(
     layout: &Layout,
-    start: (Vertex, SourceSpan),
+    start: (Location, SourceSpan),
     goal: (Vertex, SourceSpan),
     constraint: &RightOfWay,
 ) -> Result<Route, ShamanError> {
     let mut open = BinaryHeap::new();
     let mut scores = FxHashMap::default();
     let mut came_from = FxHashMap::default();
-    let s = Location {
-        time: 0,
-        position: start.0,
-    };
+    let s = start.0;
     scores.insert(s, 0.0);
     open.push(Item {
         cost: 0.0.into(),

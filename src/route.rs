@@ -54,7 +54,25 @@ impl Route {
             .collect()
     }
 
+    /// Copy the last location in the route for `n` times, but increase its time
+    pub fn stay(&mut self, n: usize) {
+        if let Some(x) = self.0.back().cloned() {
+            self.0.extend((0..=n).map(|t| Location {
+                time: x.time + t,
+                ..x
+            }));
+        }
+    }
+
     pub fn pop(&mut self) -> Option<Location> {
         self.0.pop_front()
+    }
+
+    pub fn extend(&mut self, other: Route) {
+        self.0.extend(other.0);
+    }
+
+    pub fn clear(&mut self) {
+        self.0.clear();
     }
 }

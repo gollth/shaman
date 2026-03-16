@@ -92,6 +92,12 @@ impl Display for Shaman {
                     None => {
                         if intersections.contains(&v) {
                             write!(f, "{}✕{Reset}", Fg(Magenta))?;
+                        } else if let Some((color, goal)) = self
+                            .robots
+                            .values()
+                            .find_map(|r| Some((r.color(), r.goals().position(|g| g == v)? + 1)))
+                        {
+                            write!(f, "{color}{goal}{Reset}")?;
                         } else if let Some(robot) = self
                             .robots
                             .values()
