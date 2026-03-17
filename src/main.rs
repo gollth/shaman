@@ -17,6 +17,10 @@ struct Args {
     #[arg(short('k'))]
     keep: bool,
 
+    /// Character to use for horizons of robots
+    #[arg(short('c'), default_value_t = shaman::DEFAULT_HORIZON)]
+    horizon: char,
+
     /// Path to a map file to use
     map: PathBuf,
 
@@ -49,6 +53,7 @@ fn main() -> Result<()> {
         args.fps,
         args.stop,
         args.keep,
+        args.horizon,
     )?;
     Ok(())
 }

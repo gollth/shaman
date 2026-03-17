@@ -15,6 +15,7 @@ pub struct Pbs {
     params: Params,
     layout: Layout,
     queue: BinaryHeap<Idea>,
+    horizon: char,
 }
 
 impl From<Shaman> for Pbs {
@@ -30,6 +31,7 @@ impl From<Shaman> for Pbs {
             time: value.time,
             params: value.params,
             layout: value.layout,
+            horizon: value.horizon,
             queue,
         }
     }
@@ -54,6 +56,7 @@ impl Pbs {
                 // No more conflicts (=
                 return Ok(Shaman {
                     time: self.time,
+                    horizon: self.horizon,
                     params: self.params,
                     layout: self.layout,
                     robots: idea

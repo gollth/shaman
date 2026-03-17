@@ -32,6 +32,7 @@ pub struct Shaman {
     params: Params,
     robots: FxHashMap<char, Robot>,
     layout: Layout,
+    horizon: char,
 }
 
 impl Shaman {
@@ -49,6 +50,7 @@ impl Shaman {
     fn new(code: NamedSource<String>, width: i32, height: i32) -> Self {
         Self {
             time: Time::default(),
+            horizon: DEFAULT_HORIZON,
             params: Params::default(),
             robots: Default::default(),
             layout: Layout::empty(code, width as usize, height as usize),
@@ -57,6 +59,11 @@ impl Shaman {
 
     pub fn with_params(mut self, params: Params) -> Self {
         self.params = params;
+        self
+    }
+
+    pub fn with_horizon_char(mut self, c: char) -> Self {
+        self.horizon = c;
         self
     }
 
@@ -134,7 +141,7 @@ impl Display for Shaman {
                         {
                             write!(f, "{color}{goal}{Reset}")?;
                         } else if let Some(color) = horizons.get(&v) {
-                            write!(f, "{color}▪{Reset}")?;
+                            write!(f, "{color}{}{Reset}", self.horizon)?;
                         } else if let Some(color) = routes.get(&v) {
                             write!(f, "{color}·{Reset}")?;
                         } else if self.layout.is_blocked(v) {
@@ -160,6 +167,7 @@ impl Display for Shaman {
 
 pub const DEFAULT_REPLAN: usize = 5;
 pub const DEFAULT_WINDOW: usize = 5;
+pub const DEFAULT_HORIZON: char = '⚬';
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Derivative)]
 #[derivative(Default)]
@@ -170,12 +178,21 @@ pub struct Params {
     pub replan: usize,
 }
 
-pub fn level(map: &Path, params: Params, fps: f32, stop: bool, keep: bool) -> Result<()> {
+pub fn level(
+    map: &Path,
+    params: Params,
+    fps: f32,
+    stop: bool,
+    keep: bool,
+    horizon: char,
+) -> Result<()> {
     miette::set_hook(Box::new(|_| {
         Box::new(miette::MietteHandlerOpts::new().context_lines(10).build())
     }))?;
 
-    let mut sim = Shaman::parse(map)?.with_params(params);
+    let mut sim = Shaman::parse(map)?
+        .with_params(params)
+        .with_horizon_char(horizon);
     if stop {
         println!("{sim}");
         return Ok(());
