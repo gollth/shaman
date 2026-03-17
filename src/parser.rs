@@ -38,6 +38,7 @@ pub(crate) fn parse(filename: &str, s: &str) -> Result<Shaman, ShamanError> {
     let grid = scenario
         .grid
         .into_iter()
+        .filter(|row| !row.is_empty())
         .enumerate()
         .flat_map(|(y, row)| {
             row.into_iter()
@@ -127,7 +128,6 @@ pub(crate) fn parse(filename: &str, s: &str) -> Result<Shaman, ShamanError> {
 
     for robot in shaman.robots.values_mut() {
         let Some(def) = scenario.definitions.get(&robot.name()) else {
-            println!("...");
             continue;
         };
 
@@ -165,10 +165,7 @@ enum Cell {
 
 fn scenario(s: Span) -> IResult<Scenario> {
     (definitions, grid)
-        .map(|(goals, grid)| Scenario {
-            grid,
-            definitions: goals,
-        })
+        .map(|(definitions, grid)| Scenario { grid, definitions })
         .parse(s)
 }
 
